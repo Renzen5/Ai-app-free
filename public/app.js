@@ -389,7 +389,12 @@ function bindMessageActions() {
 
   const editInput = els.messages.querySelector('.edit-input');
   if (editInput) {
-    const grow = () => { editInput.style.height = 'auto'; editInput.style.height = Math.min(editInput.scrollHeight, 300) + 'px'; };
+    const grow = () => {
+      editInput.style.height = 'auto';
+      const sh = editInput.scrollHeight;
+      editInput.style.height = Math.min(sh, 300) + 'px';
+      editInput.style.overflowY = sh > 300 ? 'auto' : 'hidden';
+    };
     editInput.oninput = grow;
     grow();
     editInput.focus();
@@ -667,7 +672,9 @@ function closeSidebar() { els.sidebar.classList.remove('open'); els.overlay.clas
 
 function autoGrow() {
   els.input.style.height = 'auto';
-  els.input.style.height = Math.min(els.input.scrollHeight, 180) + 'px';
+  const sh = els.input.scrollHeight;
+  els.input.style.height = Math.min(sh, 180) + 'px';
+  els.input.style.overflowY = sh > 180 ? 'auto' : 'hidden';
 }
 /* ============ Theme ============ */
 const prefersDark = window.matchMedia('(prefers-color-scheme: dark)');

@@ -476,6 +476,7 @@ code.inline {
   line-height: 1.55;
   resize: none;
   outline: none;
+  overflow-y: hidden;
   max-height: 300px;
 }
 .edit-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
@@ -603,6 +604,7 @@ body:not(.empty) .suggest-row { display: none; }
   font-size: 15.5px; font-family: inherit; resize: none;
   padding: 9px 4px; max-height: 180px; line-height: 1.5;
   outline: none;
+  overflow-y: hidden;
 }
 #input::placeholder { color: var(--text-muted); }
 
