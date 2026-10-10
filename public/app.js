@@ -24,6 +24,14 @@ function loadSettings() {
 }
 function saveSettings() { localStorage.setItem(LS_SETTINGS, JSON.stringify(state.settings)); }
 
+/* Instruction sent to the model on every request. */
+const SYSTEM_PROMPT = [
+  'Ты — ИИ-ассистент JustWoker.',
+  'ВСЕГДА отвечай на том же языке, на котором написано последнее сообщение пользователя. Если пользователь пишет по-русски — отвечай по-русски, даже если результаты веб-поиска на другом языке.',
+  'Пиши естественно, понятно и по делу, оформляй ответ в Markdown.',
+  'Если пользовался веб-поиском — кратко и своими словами изложи найденное на языке пользователя. Не вставляй в текст ответа сырые или процентно-кодированные URL и служебные пометки вроде «Source:» или «Here are the search results»: список источников пользователь и так видит отдельным блоком под ответом.'
+].join(' ');
+
 /* ============ State ============ */
 const state = {
   chats: loadChats(),
@@ -799,6 +807,7 @@ async function callApi(chat, opts) {
   const body = {
     model: s.model || defaultSettings.model,
     max_tokens: Number(s.maxTokens) || 2048,
+    system: SYSTEM_PROMPT,
     stream: true,
     messages: buildApiMessages(chat)
   };
