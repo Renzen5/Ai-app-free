@@ -59,6 +59,7 @@ const els = {
   modelInput: $('modelInput'), maxTokensInput: $('maxTokensInput'),
   saveSettings: $('saveSettings'), clearAllBtn: $('clearAllBtn'),
   exportAllBtn: $('exportAllBtn'),
+  importBtn: $('importBtn'), importInput: $('importInput'),
   viewer: $('viewer'), viewerImg: $('viewerImg'), viewerClose: $('viewerClose'),
   tabs: document.querySelectorAll('.tab'),
   toast: $('toast'),
@@ -253,6 +254,65 @@ function downloadJson(obj, filename) {
   document.body.appendChild(a); a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Accepts a single chat, an array of chats, or an {chats:[...]} archive.
+function normalizeChat(raw, usedIds) {
+  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.messages)) return null;
+  const messages = raw.messages
+    .filter(m => m && (m.role === 'user' || m.role === 'assistant'))
+    .map(m => ({
+      id: (typeof m.id === 'string' && m.id) ? m.id : uid(),
+      role: m.role,
+      text: typeof m.text === 'string' ? m.text : '',
+      images: Array.isArray(m.images) ? m.images.filter(im => im && typeof im.dataUrl === 'string') : [],
+      files: Array.isArray(m.files) ? m.files.filter(f => f && typeof f.name === 'string') : []
+    }))
+    .filter(m => m.text || m.images.length || m.files.length);
+
+  let id = (typeof raw.id === 'string' && raw.id) ? raw.id : uid();
+  while (usedIds.has(id)) id = uid();           // never overwrite an existing chat
+  return {
+    id,
+    title: (typeof raw.title === 'string' && raw.title.trim()) ? raw.title.trim().slice(0, 80) : 'Импортированный чат',
+    messages,
+    archived: !!raw.archived,
+    createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : Date.now()
+  };
+}
+
+function importChats(fileList) {
+  const file = fileList && fileList[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onerror = () => showToast('Не удалось прочитать файл');
+  reader.onload = () => {
+    let parsed;
+    try { parsed = JSON.parse(String(reader.result)); }
+    catch (_) { showToast('Файл повреждён или это не JSON'); return; }
+
+    let incoming;
+    if (Array.isArray(parsed)) incoming = parsed;
+    else if (parsed && Array.isArray(parsed.chats)) incoming = parsed.chats;
+    else if (parsed && Array.isArray(parsed.messages)) incoming = [parsed];
+    else { showToast('Формат файла не распознан'); return; }
+
+    const usedIds = new Set(state.chats.map(c => c.id));
+    const imported = [];
+    incoming.forEach(raw => {
+      const chat = normalizeChat(raw, usedIds);
+      if (chat) { usedIds.add(chat.id); imported.push(chat); }
+    });
+    if (!imported.length) { showToast('В файле нет чатов для импорта'); return; }
+
+    state.chats = imported.concat(state.chats);   // imported chats appear on top
+    saveChats();
+    renderChatList();
+    renderMessages();
+    closeSidebar();
+    showToast('Импортировано чатов: ' + imported.length);
+  };
+  reader.readAsText(file);
 }
 
 /* ============ Rendering: chat list ============ */
@@ -840,6 +900,8 @@ els.settingsBtn.onclick = openSettings;
 els.closeSettings.onclick = closeSettings;
 els.saveSettings.onclick = saveSettingsHandler;
 els.exportAllBtn.onclick = exportAll;
+els.importBtn.onclick = () => els.importInput.click();
+els.importInput.onchange = (e) => { importChats(e.target.files); e.target.value = ''; };
 els.viewerClose.onclick = closeViewer;
 els.viewer.onclick = (e) => { if (e.target === els.viewer) closeViewer(); };
 els.settingsModal.onclick = (e) => { if (e.target === els.settingsModal) closeSettings(); };
