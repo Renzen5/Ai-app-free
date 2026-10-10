@@ -31,7 +31,8 @@ const state = {
   tab: 'active',
   pending: [],      // attachments: {kind:'image'|'file', name, mediaType, dataUrl, text}
   sending: false,
-  editing: null     // id of the user message being edited inline
+  editing: null,    // id of the user message being edited inline
+  abort: null       // AbortController for the in-flight generation
 };
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -81,7 +82,9 @@ const IC = {
   bulb:    svg('<path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/>'),
   sun:     svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>'),
   moon:    svg('<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>'),
-  monitor: svg('<rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>')
+  monitor: svg('<rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>'),
+  arrowUp: svg('<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>'),
+  stop:    svg('<rect x="6" y="6" width="12" height="12" rx="3" fill="currentColor" stroke="none"/>')
 };
 
 /* ============ Helpers ============ */
@@ -414,6 +417,14 @@ function scrollBottom() {
   requestAnimationFrame(() => { els.messages.scrollTop = els.messages.scrollHeight; });
 }
 
+// Coalesce rapid streaming updates into one render per animation frame
+let renderScheduled = false;
+function scheduleRender() {
+  if (renderScheduled) return;
+  renderScheduled = true;
+  requestAnimationFrame(() => { renderScheduled = false; renderMessages(); });
+}
+
 /* ============ Suggestions (empty-state pills) ============ */
 const SUGGESTIONS = [
   { icon: IC.pencil, label: 'Написать', prompt: 'Помоги написать вежливое письмо коллеге с переносом встречи на завтра.' },
@@ -491,8 +502,23 @@ function handleFiles(fileList) {
 
 /* ============ Sending ============ */
 function updateSendState() {
-  const hasContent = els.input.value.trim().length > 0 || state.pending.length > 0;
-  els.sendBtn.disabled = state.sending || !hasContent;
+  const btn = els.sendBtn;
+  if (state.sending) {
+    btn.disabled = false;
+    btn.classList.add('is-stop');
+    btn.innerHTML = IC.stop;
+    btn.setAttribute('aria-label', 'Остановить генерацию');
+  } else {
+    btn.classList.remove('is-stop');
+    btn.innerHTML = IC.arrowUp;
+    btn.setAttribute('aria-label', 'Отправить');
+    const hasContent = els.input.value.trim().length > 0 || state.pending.length > 0;
+    btn.disabled = !hasContent;
+  }
+}
+
+function stopGeneration() {
+  if (state.abort) { try { state.abort.abort(); } catch (_) {} }
 }
 
 async function sendMessage() {
@@ -526,27 +552,48 @@ async function sendMessage() {
   await runCompletion(chat);
 }
 
-// Shared completion step: append a typing bubble, call the API, store the reply.
+// Shared completion step: append a typing bubble, stream the reply, allow stop.
 async function runCompletion(chat) {
   const typingMsg = { id: uid(), role: 'assistant', text: '', typing: true };
   chat.messages.push(typingMsg);
   renderMessages();
 
   state.sending = true;
+  state.abort = new AbortController();
   updateSendState();
+
+  let aborted = false;
   try {
-    const reply = await callApi(chat);
+    const reply = await callApi(chat, {
+      signal: state.abort.signal,
+      onToken: (full) => {
+        typingMsg.text = full;
+        typingMsg.typing = false;
+        scheduleRender();
+      }
+    });
     typingMsg.typing = false;
     typingMsg.text = reply;
   } catch (err) {
     typingMsg.typing = false;
-    typingMsg.text = '⚠️ Ошибка: ' + (err.message || String(err));
+    if (err && err.name === 'AbortError') {
+      aborted = true;
+      if (!typingMsg.text) {
+        const i = chat.messages.indexOf(typingMsg);
+        if (i >= 0) chat.messages.splice(i, 1);   // nothing generated yet → drop empty bubble
+      }
+    } else {
+      typingMsg.text = (typingMsg.text ? typingMsg.text + '\n\n' : '') +
+        '⚠️ Ошибка: ' + (err.message || String(err));
+    }
   } finally {
     state.sending = false;
+    state.abort = null;
     saveChats();
     renderMessages();
     renderChatList();
     updateSendState();
+    if (aborted) showToast('Генерация остановлена');
   }
 }
 
@@ -622,7 +669,8 @@ function buildApiMessages(chat) {
   });
 }
 
-async function callApi(chat) {
+async function callApi(chat, opts) {
+  opts = opts || {};
   const s = state.settings;
   const headers = { 'Content-Type': 'application/json' };
   if (s.apiKey) headers['x-api-key'] = s.apiKey;
@@ -630,23 +678,55 @@ async function callApi(chat) {
   const res = await fetch('/api/chat', {
     method: 'POST',
     headers,
+    signal: opts.signal,
     body: JSON.stringify({
       model: s.model || defaultSettings.model,
       max_tokens: Number(s.maxTokens) || 2048,
+      stream: true,
       messages: buildApiMessages(chat)
     })
   });
 
-  const data = await res.json();
+  const ctype = res.headers.get('content-type') || '';
 
   if (!res.ok) {
+    let data = null;
+    try { data = await res.json(); } catch (_) {}
     const msg = data && data.error ? (data.error.message || JSON.stringify(data.error)) : ('HTTP ' + res.status);
     throw new Error(msg);
   }
 
+  // Streaming (Server-Sent Events) — tokens arrive progressively; stop aborts the fetch
+  if (res.body && ctype.includes('text/event-stream')) {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '', full = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        if (!line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (!payload || payload === '[DONE]') continue;
+        let evt; try { evt = JSON.parse(payload); } catch (_) { continue; }
+        if (evt.type === 'content_block_delta' && evt.delta && evt.delta.type === 'text_delta') {
+          full += evt.delta.text || '';
+          if (opts.onToken) opts.onToken(full);
+        } else if (evt.type === 'error') {
+          throw new Error((evt.error && evt.error.message) || 'Ошибка потока');
+        }
+      }
+    }
+    return full.trim() || '(пустой ответ)';
+  }
+  // Fallback: non-streaming JSON (Anthropic-style)
+  const data = await res.json();
   if (Array.isArray(data.content)) {
-    return data.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim()
-      || '(пустой ответ)';
+    return data.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim() || '(пустой ответ)';
   }
   if (typeof data.completion === 'string') return data.completion;
   if (data.raw) return String(data.raw);
@@ -753,7 +833,7 @@ els.closeSidebar.onclick = closeSidebar;
 els.overlay.onclick = closeSidebar;
 els.newChatBtn.onclick = newChat;
 els.newChatTop.onclick = newChat;
-els.sendBtn.onclick = sendMessage;
+els.sendBtn.onclick = () => { if (state.sending) stopGeneration(); else sendMessage(); };
 els.attachBtn.onclick = () => els.fileInput.click();
 els.fileInput.onchange = (e) => { handleFiles(e.target.files); e.target.value = ''; };
 els.settingsBtn.onclick = openSettings;
