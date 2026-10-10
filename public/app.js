@@ -36,6 +36,11 @@ const state = {
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
+// Backfill ids for any messages persisted without one (older data / imported chats)
+state.chats.forEach(c => {
+  if (Array.isArray(c.messages)) c.messages.forEach(m => { if (!m.id) m.id = uid(); });
+});
+
 /* ============ DOM ============ */
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -331,7 +336,7 @@ function renderMessage(m) {
 
   if (editing) {
     html += `<div class="edit-box">
-      <textarea class="edit-input" rows="1">${escapeHtml(m.text || '')}</textarea>
+      <textarea class="edit-input" rows="1" aria-label="Редактирование сообщения">${escapeHtml(m.text || '')}</textarea>
       <div class="edit-actions">
         <button class="edit-cancel" type="button">Отмена</button>
         <button class="edit-save" type="button">Сохранить и отправить</button>
@@ -394,7 +399,7 @@ function bindMessageActions() {
     box.querySelector('.edit-cancel').onclick = cancelEdit;
     box.querySelector('.edit-save').onclick = () => submitEdit(id, editInput.value);
     editInput.onkeydown = (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitEdit(id, editInput.value); }
+      if (e.key === 'Enter' && !e.shiftKey && window.innerWidth > 860) { e.preventDefault(); submitEdit(id, editInput.value); }
       else if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
     };
   }
@@ -490,6 +495,7 @@ async function sendMessage() {
   const text = els.input.value.trim();
   if (!text && !state.pending.length) return;
 
+  state.editing = null;
   const chat = ensureChat();
 
   const images = state.pending.filter(a => a.kind === 'image')
@@ -546,6 +552,7 @@ function regenerate(id) {
   if (!chat) return;
   const idx = chat.messages.findIndex(m => m.id === id);
   if (idx < 0) return;
+  state.editing = null;
   // drop this assistant answer and everything after it, then re-ask
   chat.messages = chat.messages.slice(0, idx);
   saveChats();
@@ -571,7 +578,7 @@ function submitEdit(id, newText) {
   if (idx < 0) return;
   const msg = chat.messages[idx];
   const text = (newText || '').trim();
-  if (!text && !(msg.images && msg.images.length)) { cancelEdit(); return; }
+  if (!text && !(msg.images && msg.images.length) && !(msg.files && msg.files.length)) { cancelEdit(); return; }
   msg.text = text;
   // drop everything after the edited message, then re-ask
   chat.messages = chat.messages.slice(0, idx + 1);

@@ -663,6 +663,11 @@ body:not(.empty) .suggest-row { display: none; }
 .field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .field small { font-size: 11.5px; color: var(--text-muted); line-height: 1.45; }
 
+/* hide the browser's native number-field spinner arrows */
+.field input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+.field input[type="number"]::-webkit-outer-spin-button,
+.field input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
 /* theme segmented control */
 .seg {
   display: flex; gap: 4px; padding: 4px;
