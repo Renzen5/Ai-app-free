@@ -1,9 +1,13 @@
-
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#0a0a0a"/>
-  <circle cx="256" cy="256" r="118" fill="none" stroke="#ff6a00" stroke-width="22"/>
-  <circle cx="256" cy="256" r="46" fill="#ff6a00"/>
-  <circle cx="256" cy="256" r="46" fill="#ff6a00">
-    <animate attributeName="r" values="46;40;46" dur="2.6s" repeatCount="indefinite"/>
-  </circle>
+  <rect width="512" height="512" rx="112" fill="#F3EEE4"/>
+  <!-- coral speech bubble with a tail -->
+  <path d="M190 332 L150 398 L250 342 Z" fill="#D97757"/>
+  <rect x="116" y="128" width="280" height="216" rx="56" fill="#D97757"/>
+  <!-- cream spark (brand asterisk) -->
+  <g stroke="#F3EEE4" stroke-width="28" stroke-linecap="round" fill="none">
+    <line x1="256" y1="178" x2="256" y2="294"/>
+    <line x1="198" y1="236" x2="314" y2="236"/>
+    <line x1="215" y1="195" x2="297" y2="277"/>
+    <line x1="297" y1="195" x2="215" y2="277"/>
+  </g>
 </svg>

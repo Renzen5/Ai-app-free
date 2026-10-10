@@ -1,14 +1,13 @@
-
 {
   "name": "JustWoker AI",
   "short_name": "JustWoker",
-  "description": "Премиальный минималистичный ИИ-чат.",
+  "description": "Минималистичный ИИ-чат в тёплой палитре.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "orientation": "portrait",
-  "background_color": "#0a0a0a",
-  "theme_color": "#0a0a0a",
+  "orientation": "any",
+  "background_color": "#F3EEE4",
+  "theme_color": "#FAF9F5",
   "icons": [
     {
       "src": "/icon.svg",

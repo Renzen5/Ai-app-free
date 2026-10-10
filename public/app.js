@@ -1,4 +1,3 @@
-
 'use strict';
 
 /* ============ Storage ============ */
@@ -8,7 +7,8 @@ const LS_SETTINGS = 'jw_settings_v1';
 const defaultSettings = {
   apiKey: '',
   model: 'claude-opus-4-8',
-  maxTokens: 2048
+  maxTokens: 2048,
+  theme: 'system'            // 'system' | 'light' | 'dark'
 };
 
 function loadChats() {
@@ -41,10 +41,12 @@ const els = {
   sidebar: $('sidebar'), overlay: $('overlay'),
   openSidebar: $('openSidebar'), closeSidebar: $('closeSidebar'),
   newChatBtn: $('newChatBtn'), newChatTop: $('newChatTop'),
-  chatList: $('chatList'), messages: $('messages'),
+  chatList: $('chatList'), messages: $('messages'), threadArea: $('threadArea'),
   input: $('input'), sendBtn: $('sendBtn'),
   attachBtn: $('attachBtn'), fileInput: $('fileInput'),
   attachments: $('attachments'), topbarTitle: $('topbarTitle'),
+  suggestRow: $('suggestRow'),
+  themeToggle: $('themeToggle'), themeSeg: $('themeSeg'),
   settingsBtn: $('settingsBtn'), settingsModal: $('settingsModal'),
   closeSettings: $('closeSettings'), apiKeyInput: $('apiKeyInput'),
   modelInput: $('modelInput'), maxTokensInput: $('maxTokensInput'),
@@ -54,6 +56,25 @@ const els = {
   tabs: document.querySelectorAll('.tab'),
   toast: $('toast'),
   installToast: $('installToast'), installYes: $('installYes'), installNo: $('installNo')
+};
+/* ============ Icons (Lucide-style, 24x24) ============ */
+const svg = (inner) => `<svg viewBox="0 0 24 24">${inner}</svg>`;
+const IC = {
+  spark:   svg('<path d="M12 3v18"/><path d="M3 12h18"/><path d="M5.64 5.64 18.36 18.36"/><path d="M18.36 5.64 5.64 18.36"/>'),
+  pencil:  svg('<path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/>'),
+  archive: svg('<rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>'),
+  download:svg('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>'),
+  trash:   svg('<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>'),
+  copy:    svg('<rect x="8" y="8" width="14" height="14" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>'),
+  check:   svg('<path d="M20 6 9 17l-5-5"/>'),
+  file:    svg('<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>'),
+  x:       svg('<path d="M18 6 6 18"/><path d="m6 6 12 12"/>'),
+  code:    svg('<path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/>'),
+  book:    svg('<path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/>'),
+  bulb:    svg('<path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/>'),
+  sun:     svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>'),
+  moon:    svg('<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>'),
+  monitor: svg('<rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>')
 };
 
 /* ============ Helpers ============ */
@@ -66,13 +87,26 @@ function showToast(msg) {
   els.toast.textContent = msg;
   els.toast.classList.add('show');
   clearTimeout(showToast._t);
-  showToast._t = setTimeout(() => els.toast.classList.remove('show'), 2600);
+  showToast._t = setTimeout(() => els.toast.classList.remove('show'), 2400);
 }
 
-/* Minimal, safe markdown renderer */
+function copyText(text, btn) {
+  if (!navigator.clipboard || !navigator.clipboard.writeText) {
+    showToast('Копирование недоступно (нужен HTTPS)');
+    return;
+  }
+  navigator.clipboard.writeText(text).then(() => {
+    showToast('Скопировано');
+    if (btn) {
+      const old = btn.innerHTML;
+      btn.innerHTML = IC.check + '<span>Скопировано</span>';
+      setTimeout(() => { btn.innerHTML = old; }, 1500);
+    }
+  }).catch(() => showToast('Не удалось скопировать'));
+}
+/* ============ Minimal, safe markdown renderer ============ */
 function renderMarkdown(src) {
   const blocks = [];
-  // extract fenced code blocks
   let text = src.replace(/```(\w*)\n?([\s\S]*?)```/g, (m, lang, code) => {
     const i = blocks.length;
     blocks.push({ lang: lang || 'code', code: code.replace(/\n$/, '') });
@@ -81,16 +115,12 @@ function renderMarkdown(src) {
 
   text = escapeHtml(text);
 
-  // inline code
   text = text.replace(/`([^`\n]+)`/g, (m, c) => `<code class="inline">${c}</code>`);
-  // bold / italic
   text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   text = text.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>');
-  // links
   text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
     '<a href="$2" target="_blank" rel="noopener">$1</a>');
 
-  // block parsing
   const lines = text.split('\n');
   let html = '', listType = null;
   const closeList = () => { if (listType) { html += `</${listType}>`; listType = null; } };
@@ -117,19 +147,17 @@ function renderMarkdown(src) {
   }
   closeList();
 
-  // restore code blocks
   html = html.replace(/\u0000CODE(\d+)\u0000/g, (m, i) => {
     const b = blocks[+i];
     return `<div class="code-block">
       <div class="code-head"><span>${escapeHtml(b.lang)}</span>
-        <button class="copy-code"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Копировать</button>
+        <button class="copy-code">${IC.copy}<span>Копировать</span></button>
       </div>
       <pre>${escapeHtml(b.code)}</pre></div>`;
   });
 
   return html;
 }
-
 /* ============ Chat management ============ */
 function getCurrent() { return state.chats.find(c => c.id === state.currentId); }
 
@@ -139,6 +167,8 @@ function newChat() {
   renderAttachments();
   renderMessages();
   renderChatList();
+  els.input.value = '';
+  autoGrow();
   els.input.focus();
   closeSidebar();
 }
@@ -181,6 +211,17 @@ function toggleArchive(id) {
   showToast(c.archived ? 'Чат в архиве' : 'Чат восстановлен');
 }
 
+function renameChat(id) {
+  const c = state.chats.find(x => x.id === id);
+  if (!c) return;
+  const name = prompt('Новое название чата:', c.title);
+  if (name && name.trim()) {
+    c.title = name.trim().slice(0, 80);
+    saveChats();
+    renderChatList();
+    renderMessages();
+  }
+}
 function exportChat(id) {
   const c = state.chats.find(x => x.id === id);
   if (!c) return;
@@ -204,7 +245,7 @@ function downloadJson(obj, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-/* ============ Rendering ============ */
+/* ============ Rendering: chat list ============ */
 function renderChatList() {
   const list = state.chats.filter(c => state.tab === 'archived' ? c.archived : !c.archived);
   els.chatList.innerHTML = '';
@@ -212,25 +253,24 @@ function renderChatList() {
     els.chatList.innerHTML = `<div class="empty-list">${state.tab === 'archived' ? 'Архив пуст' : 'Пока нет чатов'}</div>`;
     return;
   }
+  const label = document.createElement('div');
+  label.className = 'chat-list-label';
+  label.textContent = state.tab === 'archived' ? 'Архив' : 'Недавние';
+  els.chatList.appendChild(label);
+
   list.forEach(c => {
     const item = document.createElement('div');
     item.className = 'chat-item' + (c.id === state.currentId ? ' active' : '');
     item.innerHTML = `
-      <svg viewBox="0 0 24 24"><path d="M21 11.5a8.5 8.5 0 0 1-11.8 7.8L3 21l1.7-6.2A8.5 8.5 0 1 1 21 11.5z"/></svg>
-      <span class="title">${escapeHtml(c.title)}</span>
+      <button class="title" type="button">${escapeHtml(c.title)}</button>
       <div class="item-actions">
-        <button class="act-archive" title="Архив">
-          <svg viewBox="0 0 24 24"><path d="M3 7h18v4H3zM5 11v9h14v-9M10 15h4"/></svg>
-        </button>
-        <button class="act-export" title="Экспорт">
-          <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
-        </button>
-        <button class="act-delete" title="Удалить">
-          <svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>
-        </button>
+        <button class="act-rename" title="Переименовать" aria-label="Переименовать">${IC.pencil}</button>
+        <button class="act-archive" title="${c.archived ? 'Из архива' : 'В архив'}" aria-label="Архив">${IC.archive}</button>
+        <button class="act-export" title="Экспорт" aria-label="Экспорт">${IC.download}</button>
+        <button class="act-delete" title="Удалить" aria-label="Удалить">${IC.trash}</button>
       </div>`;
     item.querySelector('.title').onclick = () => selectChat(c.id);
-    item.querySelector('svg').onclick = () => selectChat(c.id);
+    item.querySelector('.act-rename').onclick = (e) => { e.stopPropagation(); renameChat(c.id); };
     item.querySelector('.act-archive').onclick = (e) => { e.stopPropagation(); toggleArchive(c.id); };
     item.querySelector('.act-export').onclick = (e) => { e.stopPropagation(); exportChat(c.id); };
     item.querySelector('.act-delete').onclick = (e) => {
@@ -240,92 +280,105 @@ function renderChatList() {
     els.chatList.appendChild(item);
   });
 }
+/* ============ Rendering: messages ============ */
+function welcomeEl() {
+  const w = document.createElement('div');
+  w.className = 'welcome';
+  w.innerHTML = `<span class="spark" aria-hidden="true">${IC.spark}</span>
+    <h1>Чем помочь?</h1>
+    <p>Задайте вопрос, прикрепите файл или изображение.</p>`;
+  return w;
+}
 
 function renderMessages() {
   const chat = getCurrent();
   els.topbarTitle.textContent = chat ? chat.title : 'Новый чат';
-
-  if (!chat || !chat.messages.length) {
-    els.messages.innerHTML = '';
-    const w = document.createElement('div');
-    w.className = 'welcome';
-    w.innerHTML = `
-      <div class="welcome-logo"><span class="brand-dot big"></span></div>
-      <h1>Чем помочь?</h1>
-      <p>Задай вопрос, прикрепи файл или изображение.</p>
-      <div class="suggest-grid">
-        <button class="suggest" data-prompt="Объясни квантовую запутанность одним абзацем.">Квантовая запутанность</button>
-        <button class="suggest" data-prompt="Напиши функцию сортировки на Python с пояснением.">Код на Python</button>
-        <button class="suggest" data-prompt="Составь план продуктивного дня.">План дня</button>
-        <button class="suggest" data-prompt="Придумай идеи для стартапа в сфере ИИ.">Идеи стартапа</button>
-      </div>`;
-    els.messages.appendChild(w);
-    w.querySelectorAll('.suggest').forEach(b => {
-      b.onclick = () => { els.input.value = b.dataset.prompt; autoGrow(); els.input.focus(); };
-    });
-    return;
-  }
+  const empty = !chat || !chat.messages.length;
+  document.body.classList.toggle('empty', empty);
 
   els.messages.innerHTML = '';
+  if (empty) {
+    els.messages.appendChild(welcomeEl());
+    updateSendState();
+    return;
+  }
   chat.messages.forEach(m => els.messages.appendChild(renderMessage(m)));
   bindCopyButtons();
   scrollBottom();
+  updateSendState();
 }
 
 function renderMessage(m) {
   const wrap = document.createElement('div');
-  wrap.className = 'msg-wrap ' + (m.role === 'user' ? 'user' : 'ai');
+  wrap.className = 'msg ' + (m.role === 'user' ? 'user' : 'assistant');
 
-  const avatar = document.createElement('div');
-  avatar.className = 'avatar ' + (m.role === 'user' ? 'me' : 'ai');
-  avatar.textContent = m.role === 'user' ? 'Я' : 'JW';
-
-  const bubble = document.createElement('div');
-  bubble.className = 'bubble';
-
-  let inner = '';
+  let html = '';
   if (m.images && m.images.length) {
-    inner += '<div class="msg-images">';
-    m.images.forEach(img => { inner += `<img src="${img.dataUrl}" alt="img" />`; });
-    inner += '</div>';
+    html += '<div class="msg-media">' +
+      m.images.map(img => `<img src="${img.dataUrl}" alt="изображение" />`).join('') +
+      '</div>';
   }
   if (m.files && m.files.length) {
-    inner += '<div class="msg-files">';
-    m.files.forEach(f => {
-      inner += `<div class="file-chip"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>${escapeHtml(f.name)}</div>`;
-    });
-    inner += '</div>';
-  }
-  if (m.text) {
-    inner += m.role === 'user'
-      ? `<div>${escapeHtml(m.text).replace(/\n/g, '<br>')}</div>`
-      : renderMarkdown(m.text);
+    html += '<div class="msg-files">' +
+      m.files.map(f => `<div class="file-chip">${IC.file}<span>${escapeHtml(f.name)}</span></div>`).join('') +
+      '</div>';
   }
   if (m.typing) {
-    inner += `<div class="typing"><span></span><span></span><span></span></div>`;
+    html += '<div class="prose"><div class="typing"><span></span><span></span><span></span></div></div>';
+  } else if (m.text) {
+    html += m.role === 'user'
+      ? `<div class="user-bubble">${escapeHtml(m.text)}</div>`
+      : `<div class="prose">${renderMarkdown(m.text)}</div>`;
   }
-  bubble.innerHTML = inner;
-
-  bubble.querySelectorAll('.msg-images img').forEach(img => {
-    img.onclick = () => openViewer(img.src);
-  });
-
-  wrap.appendChild(avatar);
-  wrap.appendChild(bubble);
+  if (m.role !== 'user' && m.text && !m.typing) {
+    html += `<div class="msg-actions"><button class="msg-copy">${IC.copy}<span>Копировать</span></button></div>`;
+  }
+  wrap.innerHTML = html;
   return wrap;
 }
-
 function bindCopyButtons() {
   els.messages.querySelectorAll('.copy-code').forEach(btn => {
+    btn.onclick = () => copyText(btn.closest('.code-block').querySelector('pre').textContent, btn);
+  });
+  els.messages.querySelectorAll('.msg-copy').forEach(btn => {
     btn.onclick = () => {
-      const code = btn.closest('.code-block').querySelector('pre').textContent;
-      navigator.clipboard.writeText(code).then(() => showToast('Скопировано'));
+      const prose = btn.closest('.msg').querySelector('.prose');
+      copyText(prose ? prose.innerText : '', btn);
     };
+  });
+  els.messages.querySelectorAll('.msg-media img').forEach(img => {
+    img.onclick = () => openViewer(img.src);
   });
 }
 
 function scrollBottom() {
   requestAnimationFrame(() => { els.messages.scrollTop = els.messages.scrollHeight; });
+}
+
+/* ============ Suggestions (empty-state pills) ============ */
+const SUGGESTIONS = [
+  { icon: IC.pencil, label: 'Написать', prompt: 'Помоги написать вежливое письмо коллеге с переносом встречи на завтра.' },
+  { icon: IC.book,   label: 'Объяснить', prompt: 'Объясни простыми словами, что такое квантовая запутанность.' },
+  { icon: IC.code,   label: 'Код',       prompt: 'Напиши на Python функцию быстрой сортировки с пояснениями.' },
+  { icon: IC.bulb,   label: 'Идеи',      prompt: 'Предложи 5 необычных идей для стартапа в сфере ИИ.' }
+];
+function renderSuggestions() {
+  els.suggestRow.innerHTML = '';
+  SUGGESTIONS.forEach(s => {
+    const b = document.createElement('button');
+    b.className = 'suggest';
+    b.type = 'button';
+    b.setAttribute('aria-label', s.label);
+    b.title = s.label;
+    b.innerHTML = `${s.icon}<span>${s.label}</span>`;
+    b.onclick = () => {
+      els.input.value = s.prompt;
+      autoGrow();
+      updateSendState();
+      els.input.focus();
+    };
+    els.suggestRow.appendChild(b);
+  });
 }
 
 /* ============ Attachments ============ */
@@ -336,12 +389,12 @@ function renderAttachments() {
     if (att.kind === 'image') {
       el.className = 'att-item img';
       el.innerHTML = `<img src="${att.dataUrl}" alt=""/>
-        <button class="att-remove"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`;
+        <button class="att-remove" aria-label="Убрать">${IC.x}</button>`;
     } else {
       el.className = 'att-item file';
-      el.innerHTML = `<svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+      el.innerHTML = `${IC.file}
         <span class="fname">${escapeHtml(att.name)}</span>
-        <button class="att-remove"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`;
+        <button class="att-remove" aria-label="Убрать">${IC.x}</button>`;
     }
     el.querySelector('.att-remove').onclick = () => {
       state.pending.splice(idx, 1);
@@ -349,8 +402,8 @@ function renderAttachments() {
     };
     els.attachments.appendChild(el);
   });
+  updateSendState();
 }
-
 function handleFiles(fileList) {
   Array.from(fileList).forEach(file => {
     if (file.type.startsWith('image/')) {
@@ -378,6 +431,11 @@ function handleFiles(fileList) {
 }
 
 /* ============ Sending ============ */
+function updateSendState() {
+  const hasContent = els.input.value.trim().length > 0 || state.pending.length > 0;
+  els.sendBtn.disabled = state.sending || !hasContent;
+}
+
 async function sendMessage() {
   if (state.sending) return;
   const text = els.input.value.trim();
@@ -397,7 +455,6 @@ async function sendMessage() {
     chat.title = text.slice(0, 40);
   }
 
-  // clear input/attachments
   els.input.value = '';
   autoGrow();
   state.pending = [];
@@ -407,14 +464,12 @@ async function sendMessage() {
   renderChatList();
   renderMessages();
 
-  // typing bubble
   const typingMsg = { id: uid(), role: 'assistant', text: '', typing: true };
   chat.messages.push(typingMsg);
   renderMessages();
 
   state.sending = true;
-  els.sendBtn.disabled = true;
-
+  updateSendState();
   try {
     const reply = await callApi(chat);
     typingMsg.typing = false;
@@ -424,24 +479,20 @@ async function sendMessage() {
     typingMsg.text = '⚠️ Ошибка: ' + (err.message || String(err));
   } finally {
     state.sending = false;
-    els.sendBtn.disabled = false;
     saveChats();
     renderMessages();
     renderChatList();
+    updateSendState();
   }
 }
-
 function buildApiMessages(chat) {
-  // use all messages except trailing typing placeholder
   const msgs = chat.messages.filter(m => !m.typing);
   return msgs.map(m => {
     if (m.role === 'user') {
       const hasImages = m.images && m.images.length;
       let textPart = m.text || '';
       if (m.files && m.files.length) {
-        m.files.forEach(f => {
-          textPart += `\n\n[Файл: ${f.name}]\n${f.text}`;
-        });
+        m.files.forEach(f => { textPart += `\n\n[Файл: ${f.name}]\n${f.text}`; });
       }
       if (hasImages) {
         const content = [];
@@ -485,7 +536,6 @@ async function callApi(chat) {
     throw new Error(msg);
   }
 
-  // Anthropic-style response
   if (Array.isArray(data.content)) {
     return data.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim()
       || '(пустой ответ)';
@@ -495,31 +545,90 @@ async function callApi(chat) {
   return '(не удалось распознать ответ)';
 }
 
-/* ============ Viewer ============ */
+/* ============ Viewer / Sidebar / Textarea ============ */
+let lastFocus = null;
 function openViewer(src) {
+  lastFocus = document.activeElement;
   els.viewerImg.src = src;
   els.viewer.classList.add('show');
+  els.viewerClose.focus();
 }
-function closeViewer() { els.viewer.classList.remove('show'); els.viewerImg.src = ''; }
+function closeViewer() {
+  els.viewer.classList.remove('show');
+  els.viewerImg.src = '';
+  if (lastFocus && lastFocus.focus) lastFocus.focus();
+}
 
-/* ============ Sidebar ============ */
 function openSidebar() { els.sidebar.classList.add('open'); els.overlay.classList.add('show'); }
 function closeSidebar() { els.sidebar.classList.remove('open'); els.overlay.classList.remove('show'); }
 
-/* ============ Textarea autogrow ============ */
 function autoGrow() {
   els.input.style.height = 'auto';
-  els.input.style.height = Math.min(els.input.scrollHeight, 160) + 'px';
+  els.input.style.height = Math.min(els.input.scrollHeight, 180) + 'px';
 }
+/* ============ Theme ============ */
+const prefersDark = window.matchMedia('(prefers-color-scheme: dark)');
+
+function resolveTheme(t) {
+  if (t === 'light' || t === 'dark') return t;
+  return prefersDark.matches ? 'dark' : 'light';
+}
+
+function applyTheme() {
+  const t = state.settings.theme || 'system';
+  if (t === 'system') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', t);
+
+  const color = resolveTheme(t) === 'dark' ? '#262624' : '#FAF9F5';
+  let meta = document.getElementById('metaTheme');
+  if (!meta) {
+    meta = document.createElement('meta');
+    meta.name = 'theme-color';
+    meta.id = 'metaTheme';
+    document.head.appendChild(meta);
+  }
+  meta.setAttribute('content', color);
+  updateThemeUI();
+}
+
+function themeLabel(t) {
+  return t === 'system' ? 'системная' : (t === 'light' ? 'светлая' : 'тёмная');
+}
+
+function updateThemeUI() {
+  const t = state.settings.theme || 'system';
+  if (els.themeSeg) {
+    els.themeSeg.querySelectorAll('button').forEach(b =>
+      b.classList.toggle('active', b.dataset.themeVal === t));
+  }
+  els.themeToggle.innerHTML = t === 'system' ? IC.monitor : (t === 'light' ? IC.sun : IC.moon);
+  els.themeToggle.setAttribute('aria-label', 'Тема: ' + themeLabel(t));
+}
+
+function setTheme(t) {
+  state.settings.theme = t;
+  saveSettings();
+  applyTheme();
+}
+
+prefersDark.addEventListener('change', () => {
+  if ((state.settings.theme || 'system') === 'system') applyTheme();
+});
 
 /* ============ Settings ============ */
 function openSettings() {
+  lastFocus = document.activeElement;
   els.apiKeyInput.value = state.settings.apiKey;
   els.modelInput.value = state.settings.model;
   els.maxTokensInput.value = state.settings.maxTokens;
+  updateThemeUI();
   els.settingsModal.classList.add('show');
+  els.closeSettings.focus();
 }
-function closeSettings() { els.settingsModal.classList.remove('show'); }
+function closeSettings() {
+  els.settingsModal.classList.remove('show');
+  if (lastFocus && lastFocus.focus) lastFocus.focus();
+}
 function saveSettingsHandler() {
   state.settings.apiKey = els.apiKeyInput.value.trim();
   state.settings.model = els.modelInput.value.trim() || defaultSettings.model;
@@ -528,7 +637,6 @@ function saveSettingsHandler() {
   closeSettings();
   showToast('Настройки сохранены');
 }
-
 /* ============ Events ============ */
 els.openSidebar.onclick = openSidebar;
 els.closeSidebar.onclick = closeSidebar;
@@ -546,8 +654,18 @@ els.viewerClose.onclick = closeViewer;
 els.viewer.onclick = (e) => { if (e.target === els.viewer) closeViewer(); };
 els.settingsModal.onclick = (e) => { if (e.target === els.settingsModal) closeSettings(); };
 
+els.themeToggle.onclick = () => {
+  const order = ['system', 'light', 'dark'];
+  const next = order[(order.indexOf(state.settings.theme || 'system') + 1) % order.length];
+  setTheme(next);
+  showToast('Тема: ' + themeLabel(next));
+};
+els.themeSeg.querySelectorAll('button').forEach(b => {
+  b.onclick = () => setTheme(b.dataset.themeVal);
+});
+
 els.clearAllBtn.onclick = () => {
-  if (confirm('Удалить ВСЕ чаты и настройки? Это действие необратимо.')) {
+  if (confirm('Удалить ВСЕ чаты? Это действие необратимо.')) {
     localStorage.removeItem(LS_CHATS);
     state.chats = [];
     state.currentId = null;
@@ -555,13 +673,13 @@ els.clearAllBtn.onclick = () => {
     renderChatList();
     renderMessages();
     closeSettings();
-    showToast('Все данные удалены');
+    showToast('Все чаты удалены');
   }
 };
 
-els.input.oninput = autoGrow;
+els.input.oninput = () => { autoGrow(); updateSendState(); };
 els.input.onkeydown = (e) => {
-  if (e.key === 'Enter' && !e.shiftKey && window.innerWidth > 820) {
+  if (e.key === 'Enter' && !e.shiftKey && window.innerWidth > 860) {
     e.preventDefault();
     sendMessage();
   }
@@ -576,9 +694,12 @@ els.tabs.forEach(t => {
   };
 });
 
-// initial welcome suggestions binding
-document.querySelectorAll('.suggest').forEach(b => {
-  b.onclick = () => { els.input.value = b.dataset.prompt; autoGrow(); els.input.focus(); };
+// Escape closes the topmost open overlay
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (els.viewer.classList.contains('show')) closeViewer();
+  else if (els.settingsModal.classList.contains('show')) closeSettings();
+  else if (els.sidebar.classList.contains('open')) closeSidebar();
 });
 
 /* ============ PWA install ============ */
@@ -592,11 +713,7 @@ window.addEventListener('beforeinstallprompt', (e) => {
 });
 els.installYes.onclick = async () => {
   els.installToast.classList.remove('show');
-  if (deferredPrompt) {
-    deferredPrompt.prompt();
-    await deferredPrompt.userChoice;
-    deferredPrompt = null;
-  }
+  if (deferredPrompt) { deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt = null; }
 };
 els.installNo.onclick = () => els.installToast.classList.remove('show');
 window.addEventListener('appinstalled', () => {
@@ -612,6 +729,19 @@ if ('serviceWorker' in navigator) {
 }
 
 /* ============ Init ============ */
+renderSuggestions();
+applyTheme();
 renderChatList();
 renderMessages();
 autoGrow();
+updateSendState();
+
+
+
+
+
+
+
+
+
+
