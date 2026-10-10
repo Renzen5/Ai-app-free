@@ -32,6 +32,9 @@ const SYSTEM_PROMPT = [
   'Вместо этого дай один связный, прямой ответ по сути вопроса своими словами, на русском, в Markdown. Если данных не хватает — честно скажи об этом.'
 ].join(' ');
 
+/* System prompt for the second pass: rewrite found info in the user's language. */
+const PARAPHRASE_SYSTEM = 'Ты переписываешь найденную в интернете информацию СВОИМИ СЛОВАМИ на русском языке — связно, по делу, без воды. Не переводи дословно, не копируй фразы источников, не перечисляй результаты поиска списком, не пиши «Source» и не вставляй ссылки. Отвечай только на русском.';
+
 /* ============ State ============ */
 const state = {
   chats: loadChats(),
@@ -702,20 +705,47 @@ async function runCompletion(chat) {
   state.abort = new AbortController();
   updateSendState();
 
+  const s = state.settings;
   let aborted = false;
   try {
-    const reply = await callApi(chat, {
+    // Pass 1 — model answers (and runs web search if the toggle is on)
+    const first = await callApi(chat, {
       signal: state.abort.signal,
-      onUpdate: (partial) => {
-        typingMsg.text = partial.text;
-        typingMsg.searches = partial.searches;
-        if (partial.text) typingMsg.typing = false;
+      webSearch: s.webSearch,
+      onUpdate: (p) => {
+        typingMsg.searches = p.searches;
+        if (!s.webSearch) { typingMsg.text = p.text; if (p.text) typingMsg.typing = false; }
         scheduleRender();
       }
     });
+    typingMsg.searches = (first.searches && first.searches.length) ? first.searches : undefined;
+
+    if (s.webSearch && typingMsg.searches && first.text) {
+      // Pass 2 — retell the found info in the user's own words, in Russian
+      const lastUser = [...chat.messages].reverse().find(m => m.role === 'user');
+      const question = lastUser ? (lastUser.text || '') : '';
+      try {
+        const second = await callApi(null, {
+          signal: state.abort.signal,
+          system: PARAPHRASE_SYSTEM,
+          messages: [{
+            role: 'user',
+            content: 'Вопрос пользователя: "' + question + '"\n\nИнформация из интернета (может быть на разных языках):\n' +
+              first.text + '\n\nПерескажи её своими словами и дай один связный ответ на вопрос — на русском. ' +
+              'Не переводи дословно, не копируй, без списка результатов, без ссылок и слова «Source».'
+          }],
+          onUpdate: (p) => { typingMsg.text = p.text; if (p.text) typingMsg.typing = false; scheduleRender(); }
+        });
+        typingMsg.text = second.text || first.text;
+      } catch (e2) {
+        if (e2 && e2.name === 'AbortError') throw e2;   // stop was pressed
+        typingMsg.text = first.text;                     // paraphrase failed → show the raw (cleaned at render)
+      }
+    } else {
+      typingMsg.text = first.text;
+    }
     typingMsg.typing = false;
-    typingMsg.searches = (reply.searches && reply.searches.length) ? reply.searches : undefined;
-    typingMsg.text = reply.text || (typingMsg.searches ? '' : '(пустой ответ)');
+    if (!typingMsg.text && !typingMsg.searches) typingMsg.text = '(пустой ответ)';
   } catch (err) {
     typingMsg.typing = false;
     if (err && err.name === 'AbortError') {
@@ -821,11 +851,11 @@ async function callApi(chat, opts) {
   const body = {
     model: s.model || defaultSettings.model,
     max_tokens: Number(s.maxTokens) || 2048,
-    system: SYSTEM_PROMPT,
+    system: opts.system || SYSTEM_PROMPT,
     stream: true,
-    messages: buildApiMessages(chat)
+    messages: opts.messages || buildApiMessages(chat)
   };
-  if (s.webSearch) {
+  if (opts.webSearch) {
     body.tools = [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }];
   }
 
