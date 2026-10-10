@@ -27,9 +27,9 @@ function saveSettings() { localStorage.setItem(LS_SETTINGS, JSON.stringify(state
 /* Instruction sent to the model on every request. */
 const SYSTEM_PROMPT = [
   'Ты — ИИ-ассистент JustWoker.',
-  'ВСЕГДА отвечай на том же языке, на котором написано последнее сообщение пользователя. Если пользователь пишет по-русски — отвечай по-русски, даже если результаты веб-поиска на другом языке.',
-  'Пиши естественно, понятно и по делу, оформляй ответ в Markdown.',
-  'Если пользовался веб-поиском — кратко и своими словами изложи найденное на языке пользователя. Не вставляй в текст ответа сырые или процентно-кодированные URL и служебные пометки вроде «Source:» или «Here are the search results»: список источников пользователь и так видит отдельным блоком под ответом.'
+  'ГЛАВНОЕ ПРАВИЛО: отвечай ТОЛЬКО на языке последнего сообщения пользователя. Пользователь пишет по-русски — весь ответ на русском, даже если результаты веб-поиска на английском (переведи и перескажи их по-русски).',
+  'Не пересказывай результаты поиска списком. Не пиши фразы вида «I\'ll search for…», «Here are the search results», «Поиск вернул…». Не вставляй строки «Source: …» и сырые URL — источники показываются пользователю отдельным блоком.',
+  'Вместо этого дай один связный, прямой ответ по сути вопроса своими словами, на русском, в Markdown. Если данных не хватает — честно скажи об этом.'
 ].join(' ');
 
 /* ============ State ============ */
@@ -161,6 +161,17 @@ function searchBlockHtml(searches) {
       <div class="ws-body">${items ? `<div class="ws-list">${items}</div>` : ''}</div>
     </details>`;
   }).join('');
+}
+
+// Some backends echo raw search results as text ("Source: …", "Here are the search
+// results…"); the sources already render in their own block, so strip that noise.
+function cleanWebDump(text) {
+  return (text || '')
+    .replace(/^\s*Source:\s*\S+\s*$/gim, '')
+    .replace(/^\s*I'?ll search for[^\n]*$/gim, '')
+    .replace(/Here are the (?:web )?search results[^\n]*:?/gi, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 /* ============ Minimal, safe markdown renderer ============ */
 function renderMarkdown(src) {
@@ -468,9 +479,12 @@ function renderMessage(m) {
   } else if (m.typing) {
     html += '<div class="prose"><div class="typing"><span></span><span></span><span></span></div></div>';
   } else if (m.text) {
-    html += m.role === 'user'
-      ? `<div class="user-bubble">${escapeHtml(m.text)}</div>`
-      : `<div class="prose">${renderMarkdown(m.text)}</div>`;
+    if (m.role === 'user') {
+      html += `<div class="user-bubble">${escapeHtml(m.text)}</div>`;
+    } else {
+      const t = (m.searches && m.searches.length) ? cleanWebDump(m.text) : m.text;
+      html += `<div class="prose">${renderMarkdown(t)}</div>`;
+    }
   }
 
   if (!editing && !m.typing && m.text) {
