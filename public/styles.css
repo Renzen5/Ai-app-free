@@ -774,6 +774,20 @@ body:not(.empty) .suggest-row { display: none; }
   #input, .field input { font-size: 16px; }
   .item-actions { opacity: 1; }
   .msg-actions { opacity: 1; }
+
+  /* Phone: in an active chat the composer floats over the scrolling messages */
+  .hint { display: none; }
+  body:not(.empty) .composer-wrap {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 20;
+    padding-top: 28px;
+    background: linear-gradient(to top, var(--bg) 62%, rgba(0,0,0,0) 100%);
+    pointer-events: none;
+  }
+  body:not(.empty) .composer-wrap > * { pointer-events: auto; }
+  body:not(.empty) .composer { box-shadow: var(--shadow-lg); }
+  body:not(.empty) .messages { padding-bottom: calc(104px + env(safe-area-inset-bottom)); }
 }
 
 /* Once we're on desktop width, never let a left-over mobile overlay block the UI */
