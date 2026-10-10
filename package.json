@@ -1,0 +1,11 @@
+
+{
+  "name": "justwoker-chat",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Premium minimalist AI chat PWA powered by JustWoker API",
+  "scripts": {
+    "dev": "vercel dev",
+    "start": "vercel dev"
+  }
+}
