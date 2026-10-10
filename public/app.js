@@ -8,7 +8,8 @@ const defaultSettings = {
   apiKey: '',
   model: 'claude-opus-4-8',
   maxTokens: 2048,
-  theme: 'system'            // 'system' | 'light' | 'dark'
+  theme: 'system',           // 'system' | 'light' | 'dark'
+  webSearch: false           // let the model search the web (Anthropic web_search tool)
 };
 
 function loadChats() {
@@ -50,7 +51,7 @@ const els = {
   newChatBtn: $('newChatBtn'), newChatTop: $('newChatTop'),
   chatList: $('chatList'), messages: $('messages'), threadArea: $('threadArea'),
   input: $('input'), sendBtn: $('sendBtn'),
-  attachBtn: $('attachBtn'), fileInput: $('fileInput'),
+  attachBtn: $('attachBtn'), fileInput: $('fileInput'), webBtn: $('webBtn'),
   attachments: $('attachments'), topbarTitle: $('topbarTitle'),
   suggestRow: $('suggestRow'),
   themeToggle: $('themeToggle'), themeSeg: $('themeSeg'),
@@ -85,7 +86,9 @@ const IC = {
   moon:    svg('<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>'),
   monitor: svg('<rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>'),
   arrowUp: svg('<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>'),
-  stop:    svg('<rect x="6" y="6" width="12" height="12" rx="3" fill="currentColor" stroke="none"/>')
+  stop:    svg('<rect x="6" y="6" width="12" height="12" rx="3" fill="currentColor" stroke="none"/>'),
+  globe:   svg('<circle cx="12" cy="12" r="10"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/><path d="M2 12h20"/>'),
+  chevron: svg('<path d="m9 18 6-6-6-6"/>')
 };
 
 /* ============ Helpers ============ */
@@ -114,6 +117,44 @@ function copyText(text, btn) {
       setTimeout(() => { btn.innerHTML = old; }, 1500);
     }
   }).catch(() => showToast('Не удалось скопировать'));
+}
+
+/* ============ Web search blocks ============ */
+function extractWebResults(content) {
+  if (!Array.isArray(content)) return [];
+  return content
+    .filter(r => r && r.type === 'web_search_result' && typeof r.url === 'string' && /^https?:\/\//i.test(r.url))
+    .map(r => ({ url: r.url, title: (typeof r.title === 'string' && r.title) ? r.title : r.url }));
+}
+
+function domainOf(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch (_) { return url; }
+}
+
+function searchBlockHtml(searches) {
+  if (!searches || !searches.length) return '';
+  return searches.map(s => {
+    const results = s.results || [];
+    const count = results.length;
+    const items = results.map(r => {
+      const safeUrl = (r && typeof r.url === 'string' && /^https?:\/\//i.test(r.url)) ? r.url : '';
+      if (!safeUrl) return '';
+      const d = domainOf(safeUrl);
+      const fav = 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(d) + '&sz=64';
+      return `<a class="ws-src" href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener">
+        <img class="ws-fav" src="${fav}" alt="" loading="lazy" />
+        <span class="ws-domain">${escapeHtml(r.title || d)}</span>
+        <span class="ws-host">${escapeHtml(d)}</span></a>`;
+    }).join('');
+    const label = count ? 'Искал в интернете' : 'Поиск в интернете…';
+    const q = s.query
+      ? `<div class="ws-query"><span class="ws-ic">${IC.globe}</span><span class="ws-qtext">${escapeHtml(s.query)}</span>${count ? `<span class="ws-count">${count} рез.</span>` : ''}</div>`
+      : '';
+    return `<details class="websearch">
+      <summary><span class="ws-ic">${IC.globe}</span><span class="ws-label">${label}</span><span class="ws-chev">${IC.chevron}</span></summary>
+      <div class="ws-body">${q}${items ? `<div class="ws-list">${items}</div>` : ''}</div>
+    </details>`;
+  }).join('');
 }
 /* ============ Minimal, safe markdown renderer ============ */
 function renderMarkdown(src) {
@@ -266,7 +307,16 @@ function normalizeChat(raw, usedIds) {
       role: m.role,
       text: typeof m.text === 'string' ? m.text : '',
       images: Array.isArray(m.images) ? m.images.filter(im => im && typeof im.dataUrl === 'string') : [],
-      files: Array.isArray(m.files) ? m.files.filter(f => f && typeof f.name === 'string') : []
+      files: Array.isArray(m.files) ? m.files.filter(f => f && typeof f.name === 'string') : [],
+      searches: (m.role === 'assistant' && Array.isArray(m.searches))
+        ? m.searches.filter(x => x && typeof x === 'object').map(x => ({
+            query: typeof x.query === 'string' ? x.query : '',
+            results: Array.isArray(x.results)
+              ? x.results.filter(r => r && typeof r.url === 'string' && /^https?:\/\//i.test(r.url))
+                  .map(r => ({ url: r.url, title: typeof r.title === 'string' ? r.title : r.url }))
+              : []
+          }))
+        : undefined
     }))
     .filter(m => m.text || m.images.length || m.files.length);
 
@@ -393,6 +443,10 @@ function renderMessage(m) {
     html += '<div class="msg-files">' +
       m.files.map(f => `<div class="file-chip">${IC.file}<span>${escapeHtml(f.name)}</span></div>`).join('') +
       '</div>';
+  }
+
+  if (m.role !== 'user' && m.searches && m.searches.length) {
+    html += searchBlockHtml(m.searches);
   }
 
   const editing = m.role === 'user' && state.editing === m.id;
@@ -581,6 +635,12 @@ function stopGeneration() {
   if (state.abort) { try { state.abort.abort(); } catch (_) {} }
 }
 
+function updateWebUI() {
+  const on = !!state.settings.webSearch;
+  els.webBtn.classList.toggle('active', on);
+  els.webBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+}
+
 async function sendMessage() {
   if (state.sending) return;
   const text = els.input.value.trim();
@@ -626,19 +686,22 @@ async function runCompletion(chat) {
   try {
     const reply = await callApi(chat, {
       signal: state.abort.signal,
-      onToken: (full) => {
-        typingMsg.text = full;
-        typingMsg.typing = false;
+      onUpdate: (partial) => {
+        typingMsg.text = partial.text;
+        typingMsg.searches = partial.searches;
+        if (partial.text) typingMsg.typing = false;
         scheduleRender();
       }
     });
     typingMsg.typing = false;
-    typingMsg.text = reply;
+    typingMsg.searches = (reply.searches && reply.searches.length) ? reply.searches : undefined;
+    typingMsg.text = reply.text || (typingMsg.searches ? '' : '(пустой ответ)');
   } catch (err) {
     typingMsg.typing = false;
     if (err && err.name === 'AbortError') {
       aborted = true;
-      if (!typingMsg.text) {
+      const hasContent = typingMsg.text || (typingMsg.searches && typingMsg.searches.length);
+      if (!hasContent) {
         const i = chat.messages.indexOf(typingMsg);
         if (i >= 0) chat.messages.splice(i, 1);   // nothing generated yet → drop empty bubble
       }
@@ -735,17 +798,17 @@ async function callApi(chat, opts) {
   const headers = { 'Content-Type': 'application/json' };
   if (s.apiKey) headers['x-api-key'] = s.apiKey;
 
-  const res = await fetch('/api/chat', {
-    method: 'POST',
-    headers,
-    signal: opts.signal,
-    body: JSON.stringify({
-      model: s.model || defaultSettings.model,
-      max_tokens: Number(s.maxTokens) || 2048,
-      stream: true,
-      messages: buildApiMessages(chat)
-    })
-  });
+  const body = {
+    model: s.model || defaultSettings.model,
+    max_tokens: Number(s.maxTokens) || 2048,
+    stream: true,
+    messages: buildApiMessages(chat)
+  };
+  if (s.webSearch) {
+    body.tools = [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }];
+  }
+
+  const res = await fetch('/api/chat', { method: 'POST', headers, signal: opts.signal, body: JSON.stringify(body) });
 
   const ctype = res.headers.get('content-type') || '';
 
@@ -756,10 +819,14 @@ async function callApi(chat, opts) {
     throw new Error(msg);
   }
 
-  // Streaming (Server-Sent Events) — tokens arrive progressively; stop aborts the fetch
+  const searches = [];
+  const emit = (full) => { if (opts.onUpdate) opts.onUpdate({ text: full, searches }); };
+
+  // Streaming (Server-Sent Events): text tokens + web_search tool blocks
   if (res.body && ctype.includes('text/event-stream')) {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
+    const blocks = {};   // content-block index -> { type, search, jsonBuf }
     let buffer = '', full = '';
     while (true) {
       const { done, value } = await reader.read();
@@ -773,24 +840,49 @@ async function callApi(chat, opts) {
         const payload = line.slice(5).trim();
         if (!payload || payload === '[DONE]') continue;
         let evt; try { evt = JSON.parse(payload); } catch (_) { continue; }
-        if (evt.type === 'content_block_delta' && evt.delta && evt.delta.type === 'text_delta') {
-          full += evt.delta.text || '';
-          if (opts.onToken) opts.onToken(full);
+        if (evt.type === 'content_block_delta' && evt.delta) {
+          const b = blocks[evt.index];
+          if (evt.delta.type === 'text_delta') { full += evt.delta.text || ''; emit(full); }
+          else if (evt.delta.type === 'input_json_delta' && b) { b.jsonBuf = (b.jsonBuf || '') + (evt.delta.partial_json || ''); }
+        } else if (evt.type === 'content_block_start') {
+          const cb = evt.content_block || {};
+          const b = blocks[evt.index] = { type: cb.type };
+          if (cb.type === 'server_tool_use' && cb.name === 'web_search') {
+            b.search = { query: (cb.input && cb.input.query) || '', results: [] }; b.jsonBuf = '';
+            searches.push(b.search);
+          } else if (cb.type === 'web_search_tool_result') {
+            let tgt = searches[searches.length - 1];
+            if (!tgt || (tgt.results && tgt.results.length)) { tgt = { query: '', results: [] }; searches.push(tgt); }
+            tgt.results = extractWebResults(cb.content); emit(full);
+          }
+        } else if (evt.type === 'content_block_stop') {
+          const b = blocks[evt.index];
+          if (b && b.search && b.jsonBuf) { try { const p = JSON.parse(b.jsonBuf); if (p.query) { b.search.query = p.query; emit(full); } } catch (_) {} }
         } else if (evt.type === 'error') {
           throw new Error((evt.error && evt.error.message) || 'Ошибка потока');
         }
       }
     }
-    return full.trim() || '(пустой ответ)';
+    return { text: full.trim(), searches };
   }
   // Fallback: non-streaming JSON (Anthropic-style)
   const data = await res.json();
   if (Array.isArray(data.content)) {
-    return data.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim() || '(пустой ответ)';
+    let text = '';
+    data.content.forEach(b => {
+      if (b.type === 'text') text += b.text || '';
+      else if (b.type === 'server_tool_use' && b.name === 'web_search') searches.push({ query: (b.input && b.input.query) || '', results: [] });
+      else if (b.type === 'web_search_tool_result') {
+        let tgt = searches[searches.length - 1];
+        if (!tgt) { tgt = { query: '', results: [] }; searches.push(tgt); }
+        tgt.results = extractWebResults(b.content);
+      }
+    });
+    return { text: text.trim(), searches };
   }
-  if (typeof data.completion === 'string') return data.completion;
-  if (data.raw) return String(data.raw);
-  return '(не удалось распознать ответ)';
+  if (typeof data.completion === 'string') return { text: data.completion, searches };
+  if (data.raw) return { text: String(data.raw), searches };
+  return { text: '(не удалось распознать ответ)', searches };
 }
 
 /* ============ Viewer / Sidebar / Textarea ============ */
@@ -896,6 +988,12 @@ els.newChatTop.onclick = newChat;
 els.sendBtn.onclick = () => { if (state.sending) stopGeneration(); else sendMessage(); };
 els.attachBtn.onclick = () => els.fileInput.click();
 els.fileInput.onchange = (e) => { handleFiles(e.target.files); e.target.value = ''; };
+els.webBtn.onclick = () => {
+  state.settings.webSearch = !state.settings.webSearch;
+  saveSettings();
+  updateWebUI();
+  showToast(state.settings.webSearch ? 'Поиск в интернете включён' : 'Поиск в интернете выключен');
+};
 els.settingsBtn.onclick = openSettings;
 els.closeSettings.onclick = closeSettings;
 els.saveSettings.onclick = saveSettingsHandler;
@@ -983,6 +1081,7 @@ if ('serviceWorker' in navigator) {
 /* ============ Init ============ */
 renderSuggestions();
 applyTheme();
+updateWebUI();
 renderChatList();
 renderMessages();
 autoGrow();
