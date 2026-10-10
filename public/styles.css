@@ -445,7 +445,9 @@ code.inline {
   display: flex; gap: 2px; margin-top: 6px;
   opacity: 0; transition: opacity 0.18s;
 }
-.msg:hover .msg-actions { opacity: 1; }
+.msg:hover .msg-actions,
+.msg:focus-within .msg-actions { opacity: 1; }
+.msg.user .msg-actions { justify-content: flex-end; }
 .msg-actions button {
   background: none; border: none; color: var(--text-muted);
   cursor: pointer; padding: 6px; border-radius: 7px;
@@ -454,6 +456,39 @@ code.inline {
 }
 .msg-actions button:hover { color: var(--text); background: var(--surface-hover); }
 .msg-actions svg { width: 15px; height: 15px; }
+
+/* inline message editing (edit & resend) */
+.edit-box {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.edit-input {
+  width: 100%;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  padding: 12px 14px;
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1.55;
+  resize: none;
+  outline: none;
+  max-height: 300px;
+}
+.edit-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.edit-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.edit-actions button {
+  border: none; border-radius: 999px;
+  padding: 8px 15px; font-family: inherit; font-size: 13.5px; font-weight: 500;
+  cursor: pointer; transition: background 0.16s, opacity 0.16s;
+}
+.edit-save { background: var(--ink-bg); color: var(--ink-text); }
+.edit-save:hover { opacity: 0.9; }
+.edit-cancel { background: var(--surface-alt); color: var(--text); }
+.edit-cancel:hover { background: var(--surface-hover); }
 
 /* typing indicator */
 .typing { display: inline-flex; gap: 5px; padding: 6px 0; }
@@ -731,6 +766,7 @@ body:not(.empty) .suggest-row { display: none; }
   /* 16px avoids iOS Safari auto-zoom on focus */
   #input, .field input { font-size: 16px; }
   .item-actions { opacity: 1; }
+  .msg-actions { opacity: 1; }
 }
 
 /* Once we're on desktop width, never let a left-over mobile overlay block the UI */

@@ -30,7 +30,8 @@ const state = {
   currentId: null,
   tab: 'active',
   pending: [],      // attachments: {kind:'image'|'file', name, mediaType, dataUrl, text}
-  sending: false
+  sending: false,
+  editing: null     // id of the user message being edited inline
 };
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -67,6 +68,7 @@ const IC = {
   trash:   svg('<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>'),
   copy:    svg('<rect x="8" y="8" width="14" height="14" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>'),
   check:   svg('<path d="M20 6 9 17l-5-5"/>'),
+  retry:   svg('<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>'),
   file:    svg('<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>'),
   x:       svg('<path d="M18 6 6 18"/><path d="m6 6 12 12"/>'),
   code:    svg('<path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/>'),
@@ -99,7 +101,7 @@ function copyText(text, btn) {
     showToast('Скопировано');
     if (btn) {
       const old = btn.innerHTML;
-      btn.innerHTML = IC.check + '<span>Скопировано</span>';
+      btn.innerHTML = btn.classList.contains('labeled') ? IC.check + '<span>Скопировано</span>' : IC.check;
       setTimeout(() => { btn.innerHTML = old; }, 1500);
     }
   }).catch(() => showToast('Не удалось скопировать'));
@@ -151,7 +153,7 @@ function renderMarkdown(src) {
     const b = blocks[+i];
     return `<div class="code-block">
       <div class="code-head"><span>${escapeHtml(b.lang)}</span>
-        <button class="copy-code">${IC.copy}<span>Копировать</span></button>
+        <button class="copy-code labeled">${IC.copy}<span>Копировать</span></button>
       </div>
       <pre>${escapeHtml(b.code)}</pre></div>`;
   });
@@ -303,14 +305,15 @@ function renderMessages() {
     return;
   }
   chat.messages.forEach(m => els.messages.appendChild(renderMessage(m)));
-  bindCopyButtons();
-  scrollBottom();
+  bindMessageActions();
+  if (!state.editing) scrollBottom();
   updateSendState();
 }
 
 function renderMessage(m) {
   const wrap = document.createElement('div');
   wrap.className = 'msg ' + (m.role === 'user' ? 'user' : 'assistant');
+  wrap.dataset.id = m.id;
 
   let html = '';
   if (m.images && m.images.length) {
@@ -323,32 +326,78 @@ function renderMessage(m) {
       m.files.map(f => `<div class="file-chip">${IC.file}<span>${escapeHtml(f.name)}</span></div>`).join('') +
       '</div>';
   }
-  if (m.typing) {
+
+  const editing = m.role === 'user' && state.editing === m.id;
+
+  if (editing) {
+    html += `<div class="edit-box">
+      <textarea class="edit-input" rows="1">${escapeHtml(m.text || '')}</textarea>
+      <div class="edit-actions">
+        <button class="edit-cancel" type="button">Отмена</button>
+        <button class="edit-save" type="button">Сохранить и отправить</button>
+      </div>
+    </div>`;
+  } else if (m.typing) {
     html += '<div class="prose"><div class="typing"><span></span><span></span><span></span></div></div>';
   } else if (m.text) {
     html += m.role === 'user'
       ? `<div class="user-bubble">${escapeHtml(m.text)}</div>`
       : `<div class="prose">${renderMarkdown(m.text)}</div>`;
   }
-  if (m.role !== 'user' && m.text && !m.typing) {
-    html += `<div class="msg-actions"><button class="msg-copy">${IC.copy}<span>Копировать</span></button></div>`;
+
+  if (!editing && !m.typing && m.text) {
+    if (m.role === 'user') {
+      html += `<div class="msg-actions">
+        <button class="msg-edit" title="Редактировать" aria-label="Редактировать">${IC.pencil}</button>
+        <button class="msg-copy" title="Копировать" aria-label="Копировать">${IC.copy}</button>
+      </div>`;
+    } else {
+      html += `<div class="msg-actions">
+        <button class="msg-copy" title="Копировать" aria-label="Копировать">${IC.copy}</button>
+        <button class="msg-retry" title="Сгенерировать заново" aria-label="Сгенерировать заново">${IC.retry}</button>
+      </div>`;
+    }
   }
+
   wrap.innerHTML = html;
   return wrap;
 }
-function bindCopyButtons() {
+function bindMessageActions() {
   els.messages.querySelectorAll('.copy-code').forEach(btn => {
     btn.onclick = () => copyText(btn.closest('.code-block').querySelector('pre').textContent, btn);
   });
   els.messages.querySelectorAll('.msg-copy').forEach(btn => {
     btn.onclick = () => {
-      const prose = btn.closest('.msg').querySelector('.prose');
-      copyText(prose ? prose.innerText : '', btn);
+      const el = btn.closest('.msg').querySelector('.prose, .user-bubble');
+      copyText(el ? el.innerText : '', btn);
     };
+  });
+  els.messages.querySelectorAll('.msg-retry').forEach(btn => {
+    btn.onclick = () => regenerate(btn.closest('.msg').dataset.id);
+  });
+  els.messages.querySelectorAll('.msg-edit').forEach(btn => {
+    btn.onclick = () => startEdit(btn.closest('.msg').dataset.id);
   });
   els.messages.querySelectorAll('.msg-media img').forEach(img => {
     img.onclick = () => openViewer(img.src);
   });
+
+  const editInput = els.messages.querySelector('.edit-input');
+  if (editInput) {
+    const grow = () => { editInput.style.height = 'auto'; editInput.style.height = Math.min(editInput.scrollHeight, 300) + 'px'; };
+    editInput.oninput = grow;
+    grow();
+    editInput.focus();
+    editInput.setSelectionRange(editInput.value.length, editInput.value.length);
+    const id = editInput.closest('.msg').dataset.id;
+    const box = editInput.closest('.edit-box');
+    box.querySelector('.edit-cancel').onclick = cancelEdit;
+    box.querySelector('.edit-save').onclick = () => submitEdit(id, editInput.value);
+    editInput.onkeydown = (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitEdit(id, editInput.value); }
+      else if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+    };
+  }
 }
 
 function scrollBottom() {
@@ -448,8 +497,7 @@ async function sendMessage() {
   const files = state.pending.filter(a => a.kind === 'file')
     .map(a => ({ name: a.name, text: a.text }));
 
-  const userMsg = { id: uid(), role: 'user', text, images, files };
-  chat.messages.push(userMsg);
+  chat.messages.push({ id: uid(), role: 'user', text, images, files });
 
   if (chat.title === 'Новый чат' && text) {
     chat.title = text.slice(0, 40);
@@ -464,6 +512,11 @@ async function sendMessage() {
   renderChatList();
   renderMessages();
 
+  await runCompletion(chat);
+}
+
+// Shared completion step: append a typing bubble, call the API, store the reply.
+async function runCompletion(chat) {
   const typingMsg = { id: uid(), role: 'assistant', text: '', typing: true };
   chat.messages.push(typingMsg);
   renderMessages();
@@ -484,6 +537,49 @@ async function sendMessage() {
     renderChatList();
     updateSendState();
   }
+}
+
+/* ---- Rollback: regenerate an answer / edit & resend a message ---- */
+function regenerate(id) {
+  if (state.sending) return;
+  const chat = getCurrent();
+  if (!chat) return;
+  const idx = chat.messages.findIndex(m => m.id === id);
+  if (idx < 0) return;
+  // drop this assistant answer and everything after it, then re-ask
+  chat.messages = chat.messages.slice(0, idx);
+  saveChats();
+  renderMessages();
+  renderChatList();
+  if (chat.messages.length) runCompletion(chat);
+}
+
+function startEdit(id) {
+  if (state.sending) return;
+  state.editing = id;
+  renderMessages();
+}
+function cancelEdit() {
+  state.editing = null;
+  renderMessages();
+}
+function submitEdit(id, newText) {
+  if (state.sending) return;
+  const chat = getCurrent();
+  if (!chat) return;
+  const idx = chat.messages.findIndex(m => m.id === id);
+  if (idx < 0) return;
+  const msg = chat.messages[idx];
+  const text = (newText || '').trim();
+  if (!text && !(msg.images && msg.images.length)) { cancelEdit(); return; }
+  msg.text = text;
+  // drop everything after the edited message, then re-ask
+  chat.messages = chat.messages.slice(0, idx + 1);
+  state.editing = null;
+  saveChats();
+  renderMessages();
+  renderChatList();
+  runCompletion(chat);
 }
 function buildApiMessages(chat) {
   const msgs = chat.messages.filter(m => !m.typing);
