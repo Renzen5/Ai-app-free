@@ -147,12 +147,10 @@ function searchBlockHtml(searches) {
         <span class="ws-host">${escapeHtml(d)}</span></a>`;
     }).join('');
     const label = count ? 'Искал в интернете' : 'Поиск в интернете…';
-    const q = s.query
-      ? `<div class="ws-query"><span class="ws-ic">${IC.globe}</span><span class="ws-qtext">${escapeHtml(s.query)}</span>${count ? `<span class="ws-count">${count} рез.</span>` : ''}</div>`
-      : '';
+    const countTag = count ? `<span class="ws-count">${count} рез.</span>` : '';
     return `<details class="websearch">
-      <summary><span class="ws-ic">${IC.globe}</span><span class="ws-label">${label}</span><span class="ws-chev">${IC.chevron}</span></summary>
-      <div class="ws-body">${q}${items ? `<div class="ws-list">${items}</div>` : ''}</div>
+      <summary><span class="ws-ic">${IC.globe}</span><span class="ws-label">${label}</span>${countTag}<span class="ws-chev">${IC.chevron}</span></summary>
+      <div class="ws-body">${items ? `<div class="ws-list">${items}</div>` : ''}</div>
     </details>`;
   }).join('');
 }
@@ -1073,8 +1071,19 @@ window.addEventListener('appinstalled', () => {
 
 /* ============ Service worker ============ */
 if ('serviceWorker' in navigator) {
+  // When a new service worker takes over, reload once so fresh CSS/JS/HTML apply.
+  const hadController = !!navigator.serviceWorker.controller;
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (refreshing || !hadController) return;   // skip the very first install
+    refreshing = true;
+    location.reload();
+  });
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
+    navigator.serviceWorker.register('/sw.js').then((reg) => {
+      reg.update();
+      setInterval(() => reg.update(), 60 * 60 * 1000);   // check hourly
+    }).catch(() => {});
   });
 }
 
