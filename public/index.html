@@ -1,0 +1,155 @@
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+  <title>JustWoker · AI</title>
+  <meta name="description" content="Премиальный минималистичный ИИ-чат на базе JustWoker." />
+
+  <meta name="theme-color" content="#0a0a0a" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+
+  <!-- iOS install -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="JustWoker" />
+  <link rel="apple-touch-icon" href="/icon.svg" />
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <!-- Overlay for sidebar on mobile -->
+  <div class="overlay" id="overlay"></div>
+
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-head">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <span class="brand-name">JustWoker</span>
+      </div>
+      <button class="icon-btn" id="closeSidebar" aria-label="Закрыть меню">
+        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+
+    <button class="new-chat-btn" id="newChatBtn">
+      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      Новый чат
+    </button>
+
+    <div class="chat-tabs">
+      <button class="tab active" data-tab="active">Чаты</button>
+      <button class="tab" data-tab="archived">Архив</button>
+    </div>
+
+    <div class="chat-list" id="chatList"></div>
+
+    <div class="sidebar-foot">
+      <button class="foot-btn" id="exportAllBtn">
+        <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
+        Экспорт всех
+      </button>
+      <button class="foot-btn" id="settingsBtn">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14 1h-4l-.6 2.5a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-1c.6.5 1.3.9 2 1.2L10 23h4l.6-2.5c.7-.3 1.4-.7 2-1.2l2.3 1 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z"/></svg>
+        Настройки
+      </button>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <header class="topbar">
+      <button class="icon-btn" id="openSidebar" aria-label="Открыть меню">
+        <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <div class="topbar-title" id="topbarTitle">Новый чат</div>
+      <button class="icon-btn" id="newChatTop" aria-label="Новый чат">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+    </header>
+
+    <section class="messages" id="messages">
+      <div class="welcome" id="welcome">
+        <div class="welcome-logo">
+          <span class="brand-dot big"></span>
+        </div>
+        <h1>Чем помочь?</h1>
+        <p>Задай вопрос, прикрепи файл или изображение.</p>
+        <div class="suggest-grid">
+          <button class="suggest" data-prompt="Объясни квантовую запутанность одним абзацем.">Квантовая запутанность</button>
+          <button class="suggest" data-prompt="Напиши функцию сортировки на Python с пояснением.">Код на Python</button>
+          <button class="suggest" data-prompt="Составь план продуктивного дня.">План дня</button>
+          <button class="suggest" data-prompt="Придумай идеи для стартапа в сфере ИИ.">Идеи стартапа</button>
+        </div>
+      </div>
+    </section>
+
+    <div class="composer-wrap">
+      <div class="attachments" id="attachments"></div>
+      <div class="composer">
+        <button class="icon-btn attach" id="attachBtn" aria-label="Прикрепить">
+          <svg viewBox="0 0 24 24"><path d="M21 11.5l-8.5 8.5a5 5 0 0 1-7-7l9-9a3.5 3.5 0 0 1 5 5l-9 9a2 2 0 0 1-3-3l8-8"/></svg>
+        </button>
+        <input type="file" id="fileInput" multiple hidden
+          accept="image/*,.txt,.md,.json,.js,.ts,.py,.html,.css,.csv,.xml,.yml,.yaml,.java,.c,.cpp,.go,.rs,.php,.rb,.sh" />
+        <textarea id="input" rows="1" placeholder="Сообщение…"></textarea>
+        <button class="send-btn" id="sendBtn" aria-label="Отправить">
+          <svg viewBox="0 0 24 24"><path d="M4 12l16-8-6 16-3-6-7-2z"/></svg>
+        </button>
+      </div>
+      <div class="hint">JustWoker может ошибаться. Проверяйте важное.</div>
+    </div>
+  </main>
+
+  <!-- Settings modal -->
+  <div class="modal" id="settingsModal">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>Настройки</h2>
+        <button class="icon-btn" id="closeSettings" aria-label="Закрыть">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <label class="field">
+        <span>API ключ (x-api-key)</span>
+        <input type="password" id="apiKeyInput" placeholder="Ваш ключ JustWoker" autocomplete="off" />
+        <small>Хранится только на этом устройстве. Можно оставить пустым, если ключ задан на сервере.</small>
+      </label>
+      <label class="field">
+        <span>Модель</span>
+        <input type="text" id="modelInput" placeholder="claude-opus-4-8" />
+      </label>
+      <label class="field">
+        <span>Макс. токенов</span>
+        <input type="number" id="maxTokensInput" min="256" max="8192" step="256" />
+      </label>
+      <button class="primary-btn" id="saveSettings">Сохранить</button>
+      <button class="danger-btn" id="clearAllBtn">Удалить все данные</button>
+    </div>
+  </div>
+
+  <!-- Image viewer -->
+  <div class="viewer" id="viewer">
+    <button class="icon-btn viewer-close" id="viewerClose" aria-label="Закрыть">
+      <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+    <img id="viewerImg" alt="Просмотр" />
+  </div>
+
+  <!-- Install toast -->
+  <div class="install-toast" id="installToast">
+    <span>Установить приложение на телефон?</span>
+    <div class="install-actions">
+      <button id="installYes">Установить</button>
+      <button id="installNo" class="ghost">Позже</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
