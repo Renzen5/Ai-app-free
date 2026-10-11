@@ -35,8 +35,11 @@ const SYSTEM_PROMPT = [
   'Если задача сложная, продумай её по шагам, но показывай пользователю чистый результат, а не черновые рассуждения.'
 ].join(' ');
 
-/* Appended to the system prompt only when web search is enabled for the request. */
-const SEARCH_RULES = ' У тебя есть инструмент веб-поиска. Используй его ТОЛЬКО когда ответ требует свежих или внешних данных, которых ты можешь не знать (новости, цены, статистика, события, факты о конкретных людях, местах или продуктах); общие вопросы, объяснения, тексты и код решай сам, без поиска. Формулируй точные запросы по смыслу, а не по буквальному слову. По итогам дай один связный ответ своими словами на языке пользователя — не список результатов; не вставляй сырые ссылки, строки «Source:» и фразы вроде «вот результаты поиска», источники показываются пользователю отдельным блоком.';
+/* Appended to the system prompt only when web search is enabled (keeps the base prompt universal). */
+const SEARCH_RULES = ' У тебя есть инструмент веб-поиска. Используй его ТОЛЬКО когда ответ требует свежих или внешних данных, которых ты можешь не знать (новости, цены, статистика, события, факты о конкретных людях, местах или продуктах); общие вопросы, объяснения, тексты и код решай сам, без поиска. Если вопрос короткий или неоднозначный и неясно, что именно нужно (например «что это?» без контекста), не ищи — коротко попроси уточнить. Формулируй точные запросы по смыслу, а не по буквальному слову. По итогам дай ОДИН связный ответ своими словами на языке пользователя; НИКОГДА не вываливай сырые результаты поиска — ни списков заголовков, ни цитат источников, ни ссылок, ни слова «Source». Источники пользователь видит отдельным блоком.';
+
+/* Used only for the synthesis pass that rewrites found info into one clean answer. */
+const SYNTHESIS_SYSTEM = 'Ты получаешь вопрос пользователя и найденную в интернете информацию (возможно, на разных языках и обрывками). Дай ОДИН связный, прямой ответ по сути вопроса своими словами, на языке последнего сообщения пользователя. НЕ перечисляй результаты поиска, не копируй заголовки и фрагменты источников, не вставляй ссылки и слово «Source». Если нужных данных нет — честно скажи об этом одним предложением.';
 
 /* ============ State ============ */
 const state = {
@@ -884,21 +887,46 @@ async function runCompletion(chat) {
       }
     }
 
-    // Single pass — web search is always available; the model decides on its own
-    // when to use it (fresh facts, things it doesn't know, or when asked) and
-    // streams the answer live.
+    // Web search is always available; the model decides when to use it. If the user
+    // attached an image, skip search so the model answers from the picture instead.
+    const hasImage = !!(priceUser && priceUser.images && priceUser.images.length);
     const first = await callApi(chat, {
       signal: state.abort.signal,
-      webSearch: true,
+      webSearch: !hasImage,
       onUpdate: (p) => {
         typingMsg.searches = (p.searches && p.searches.length) ? p.searches : undefined;
-        typingMsg.text = p.text;
-        if (p.text) typingMsg.typing = false;
+        // While searching, keep the typing dots — the model's raw pass-1 text can be a
+        // dump of result snippets; the synthesis pass below produces the clean answer.
+        if (!typingMsg.searches) { typingMsg.text = p.text; if (p.text) typingMsg.typing = false; }
         scheduleRender(typingMsg);
       }
     });
     typingMsg.searches = (first.searches && first.searches.length) ? first.searches : undefined;
-    typingMsg.text = first.text;
+
+    if (typingMsg.searches && first.text) {
+      // Synthesis pass — turn the found info into one clean answer in the user's
+      // language, so we never show the raw "list of search results" dump.
+      const question = priceUser ? (priceUser.text || '') : '';
+      try {
+        const second = await callApi(null, {
+          signal: state.abort.signal,
+          system: SYNTHESIS_SYSTEM,
+          messages: [{
+            role: 'user',
+            content: 'Вопрос пользователя: "' + question + '"\n\nНайденная в интернете информация:\n' +
+              first.text + '\n\nСформулируй один связный ответ по сути вопроса — своими словами, на языке вопроса. ' +
+              'Без списков результатов, без заголовков источников, без ссылок и слова «Source».'
+          }],
+          onUpdate: (p) => { typingMsg.text = p.text; if (p.text) typingMsg.typing = false; scheduleRender(typingMsg); }
+        });
+        typingMsg.text = second.text || first.text;
+      } catch (e2) {
+        if (e2 && e2.name === 'AbortError') throw e2;   // stop pressed
+        typingMsg.text = first.text;                     // synthesis failed → raw (cleaned at render)
+      }
+    } else {
+      typingMsg.text = first.text;
+    }
     typingMsg.typing = false;
     if (!typingMsg.text && !typingMsg.searches) typingMsg.text = '(пустой ответ)';
   } catch (err) {
