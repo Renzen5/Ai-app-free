@@ -167,6 +167,17 @@
         <input type="number" id="maxTokensInput" min="256" max="8192" step="256" />
       </label>
 
+      <div class="field">
+        <span>Уровень рассуждений</span>
+        <div class="seg" id="thinkSeg">
+          <button type="button" data-think-val="off">Выкл</button>
+          <button type="button" data-think-val="low">Низкий</button>
+          <button type="button" data-think-val="medium">Средний</button>
+          <button type="button" data-think-val="high">Высокий</button>
+        </div>
+        <small>Модель обдумывает ответ перед тем, как его дать; ход мыслей показывается отдельным блоком «Размышления». Выше уровень — глубже рассуждение, но медленнее.</small>
+      </div>
+
       <button class="primary-btn" id="saveSettings">Сохранить</button>
       <button class="danger-btn" id="clearAllBtn">Удалить все данные</button>
     </div>

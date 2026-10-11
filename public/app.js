@@ -8,7 +8,8 @@ const defaultSettings = {
   apiKey: '',
   model: 'claude-opus-4-8',
   maxTokens: 2048,
-  theme: 'system'            // 'system' | 'light' | 'dark'
+  theme: 'system',           // 'system' | 'light' | 'dark'
+  thinkingLevel: 'off'       // 'off' | 'low' | 'medium' | 'high' — extended thinking
 };
 
 function loadChats() {
@@ -71,7 +72,7 @@ const els = {
   attachBtn: $('attachBtn'), fileInput: $('fileInput'),
   attachments: $('attachments'), topbarTitle: $('topbarTitle'),
   suggestRow: $('suggestRow'),
-  themeToggle: $('themeToggle'), themeSeg: $('themeSeg'),
+  themeToggle: $('themeToggle'), themeSeg: $('themeSeg'), thinkSeg: $('thinkSeg'),
   settingsBtn: $('settingsBtn'), settingsModal: $('settingsModal'),
   closeSettings: $('closeSettings'), apiKeyInput: $('apiKeyInput'),
   modelInput: $('modelInput'), maxTokensInput: $('maxTokensInput'),
@@ -146,6 +147,16 @@ function extractWebResults(content) {
 
 function domainOf(url) {
   try { return new URL(url).hostname.replace(/^www\./, ''); } catch (_) { return url; }
+}
+
+// Collapsible block showing the model's extended-thinking reasoning. Open while the
+// model is still thinking (before any answer text), collapsed once the answer starts.
+function thinkingBlockHtml(text, open) {
+  if (!text) return '';
+  return `<details class="thinking"${open ? ' open' : ''}>
+    <summary><span class="th-ic">${IC.bulb}</span><span class="th-label">Размышления</span><span class="th-chev">${IC.chevron}</span></summary>
+    <div class="th-body">${escapeHtml(text)}</div>
+  </details>`;
 }
 
 function searchBlockHtml(searches) {
@@ -471,6 +482,9 @@ function renderMessage(m) {
       '</div>';
   }
 
+  if (m.role !== 'user' && m.thinking) {
+    html += thinkingBlockHtml(m.thinking, !!(m.typing && !m.text));
+  }
   if (m.role !== 'user' && m.searches && m.searches.length) {
     html += searchBlockHtml(m.searches);
   }
@@ -916,8 +930,10 @@ async function runCompletion(chat) {
       signal: state.abort.signal,
       webSearch: useSearch,
       system: sysOverride,
+      think: state.settings.thinkingLevel,
       onUpdate: (p) => {
         typingMsg.searches = (p.searches && p.searches.length) ? p.searches : undefined;
+        typingMsg.thinking = (p.thinking && p.thinking.trim()) ? p.thinking : undefined;
         // Hide the raw pass-1 text only when a synthesis pass will replace it (a dump
         // of result snippets). With an image we stream the answer live (no 2nd pass).
         if (!(synthesize && typingMsg.searches)) { typingMsg.text = p.text; if (p.text) typingMsg.typing = false; }
@@ -925,6 +941,7 @@ async function runCompletion(chat) {
       }
     });
     typingMsg.searches = (first.searches && first.searches.length) ? first.searches : undefined;
+    typingMsg.thinking = (first.thinking && first.thinking.trim()) ? first.thinking : undefined;
 
     if (synthesize && typingMsg.searches && first.text) {
       // Synthesis pass — turn the found info into one clean answer in the user's
@@ -1067,15 +1084,23 @@ async function callApi(chat, opts) {
   let system = opts.system || SYSTEM_PROMPT;
   if (opts.webSearch) system += SEARCH_RULES;   // search guidance only when the tool is attached
 
+  const answerTokens = Number(s.maxTokens) || 2048;
   const body = {
     model: s.model || defaultSettings.model,
-    max_tokens: Number(s.maxTokens) || 2048,
+    max_tokens: answerTokens,
     system,
     stream: true,
     messages: opts.messages || buildApiMessages(chat)
   };
   if (opts.webSearch) {
     body.tools = [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }];
+  }
+  // Extended thinking: the model reasons before answering (budget_tokens). max_tokens
+  // is the total, so it must leave room for both the reasoning and the answer.
+  const thinkBudget = { low: 2000, medium: 6000, high: 12000 }[opts.think];
+  if (thinkBudget) {
+    body.thinking = { type: 'enabled', budget_tokens: thinkBudget };
+    body.max_tokens = thinkBudget + Math.max(answerTokens, 1024);
   }
 
   const res = await fetch('/api/chat', { method: 'POST', headers, signal: opts.signal, body: JSON.stringify(body) });
@@ -1090,7 +1115,8 @@ async function callApi(chat, opts) {
   }
 
   const searches = [];
-  const emit = (full) => { if (opts.onUpdate) opts.onUpdate({ text: full, searches }); };
+  let thinking = '';
+  const emit = (full) => { if (opts.onUpdate) opts.onUpdate({ text: full, searches, thinking }); };
 
   // Streaming (Server-Sent Events): text tokens + web_search tool blocks
   if (res.body && ctype.includes('text/event-stream')) {
@@ -1113,6 +1139,7 @@ async function callApi(chat, opts) {
         if (evt.type === 'content_block_delta' && evt.delta) {
           const b = blocks[evt.index];
           if (evt.delta.type === 'text_delta') { full += evt.delta.text || ''; emit(full); }
+          else if (evt.delta.type === 'thinking_delta') { thinking += evt.delta.thinking || ''; emit(full); }
           else if (evt.delta.type === 'input_json_delta' && b) { b.jsonBuf = (b.jsonBuf || '') + (evt.delta.partial_json || ''); }
         } else if (evt.type === 'content_block_start') {
           const cb = evt.content_block || {};
@@ -1133,7 +1160,7 @@ async function callApi(chat, opts) {
         }
       }
     }
-    return { text: full.trim(), searches };
+    return { text: full.trim(), searches, thinking };
   }
   // Fallback: non-streaming JSON (Anthropic-style)
   const data = await res.json();
@@ -1141,6 +1168,7 @@ async function callApi(chat, opts) {
     let text = '';
     data.content.forEach(b => {
       if (b.type === 'text') text += b.text || '';
+      else if (b.type === 'thinking') thinking += b.thinking || '';
       else if (b.type === 'server_tool_use' && b.name === 'web_search') searches.push({ query: (b.input && b.input.query) || '', results: [] });
       else if (b.type === 'web_search_tool_result') {
         let tgt = searches[searches.length - 1];
@@ -1148,11 +1176,11 @@ async function callApi(chat, opts) {
         tgt.results = extractWebResults(b.content);
       }
     });
-    return { text: text.trim(), searches };
+    return { text: text.trim(), searches, thinking };
   }
-  if (typeof data.completion === 'string') return { text: data.completion, searches };
-  if (data.raw) return { text: String(data.raw), searches };
-  return { text: '(не удалось распознать ответ)', searches };
+  if (typeof data.completion === 'string') return { text: data.completion, searches, thinking };
+  if (data.raw) return { text: String(data.raw), searches, thinking };
+  return { text: '(не удалось распознать ответ)', searches, thinking };
 }
 
 /* ============ Viewer / Sidebar / Textarea ============ */
@@ -1227,6 +1255,18 @@ prefersDark.addEventListener('change', () => {
   if ((state.settings.theme || 'system') === 'system') applyTheme();
 });
 
+/* ============ Reasoning level (extended thinking) ============ */
+function updateThinkUI() {
+  const lvl = state.settings.thinkingLevel || 'off';
+  if (els.thinkSeg) els.thinkSeg.querySelectorAll('button').forEach(b =>
+    b.classList.toggle('active', b.dataset.thinkVal === lvl));
+}
+function setThinkLevel(lvl) {
+  state.settings.thinkingLevel = lvl;
+  saveSettings();
+  updateThinkUI();
+}
+
 /* ============ Settings ============ */
 function openSettings() {
   lastFocus = document.activeElement;
@@ -1234,6 +1274,7 @@ function openSettings() {
   els.modelInput.value = state.settings.model;
   els.maxTokensInput.value = state.settings.maxTokens;
   updateThemeUI();
+  updateThinkUI();
   els.settingsModal.classList.add('show');
   els.closeSettings.focus();
 }
@@ -1276,6 +1317,9 @@ els.themeToggle.onclick = () => {
 };
 els.themeSeg.querySelectorAll('button').forEach(b => {
   b.onclick = () => setTheme(b.dataset.themeVal);
+});
+if (els.thinkSeg) els.thinkSeg.querySelectorAll('button').forEach(b => {
+  b.onclick = () => setThinkLevel(b.dataset.thinkVal);
 });
 
 els.clearAllBtn.onclick = () => {
