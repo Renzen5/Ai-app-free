@@ -24,18 +24,14 @@
 
   <link rel="stylesheet" href="/styles.css" />
 
-  <!-- Apply saved theme before first paint to avoid a flash, and set the theme-color
-       to match it at launch so the system bars (incl. the Android nav bar, which Chrome
-       colors at launch) match the chosen theme. -->
+  <!-- Apply saved theme before first paint to avoid a flash -->
   <script>
     (function () {
       try {
         var s = JSON.parse(localStorage.getItem('jw_settings_v1') || '{}');
-        var t = s.theme || 'system';
-        if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
-        var dark = t === 'dark' || (t !== 'light' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
-        var m = document.getElementById('metaTheme');
-        if (m) m.setAttribute('content', dark ? '#262624' : '#FAF9F5');
+        if (s.theme === 'light' || s.theme === 'dark') {
+          document.documentElement.setAttribute('data-theme', s.theme);
+        }
       } catch (e) {}
     })();
   </script>
@@ -170,17 +166,6 @@
         <span>Макс. токенов</span>
         <input type="number" id="maxTokensInput" min="256" max="8192" step="256" />
       </label>
-
-      <div class="field">
-        <span>Уровень рассуждений</span>
-        <div class="seg" id="thinkSeg">
-          <button type="button" data-think-val="off">Выкл</button>
-          <button type="button" data-think-val="low">Низкий</button>
-          <button type="button" data-think-val="medium">Средний</button>
-          <button type="button" data-think-val="high">Высокий</button>
-        </div>
-        <small>Модель обдумывает ответ перед тем, как его дать; ход мыслей показывается отдельным блоком «Размышления». Выше уровень — глубже рассуждение, но медленнее.</small>
-      </div>
 
       <button class="primary-btn" id="saveSettings">Сохранить</button>
       <button class="danger-btn" id="clearAllBtn">Удалить все данные</button>
