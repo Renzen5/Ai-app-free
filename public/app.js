@@ -16,7 +16,10 @@ function loadChats() {
   try { return JSON.parse(localStorage.getItem(LS_CHATS)) || []; }
   catch (_) { return []; }
 }
-function saveChats() { localStorage.setItem(LS_CHATS, JSON.stringify(state.chats)); }
+function saveChats() {
+  try { localStorage.setItem(LS_CHATS, JSON.stringify(state.chats)); }
+  catch (_) { showToast('Не удалось сохранить историю: не хватает места в браузере'); }
+}
 
 function loadSettings() {
   try { return { ...defaultSettings, ...(JSON.parse(localStorage.getItem(LS_SETTINGS)) || {}) }; }
@@ -666,18 +669,45 @@ function renderAttachments() {
   });
   updateSendState();
 }
+// Downscale + re-encode attached images. Phone photos are several MB, which blows
+// the browser's localStorage quota (saveChats) AND the server's request-size limit,
+// so a full-size photo message silently failed to send. 1536px / JPEG keeps good
+// quality while staying small (and within the vision model's recommended input size).
+function readImageScaled(file) {
+  return new Promise((resolve) => {
+    const fallback = () => {
+      const r = new FileReader();
+      r.onload = () => resolve({ dataUrl: String(r.result), mediaType: file.type });
+      r.onerror = () => resolve(null);
+      r.readAsDataURL(file);
+    };
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      try {
+        const MAX = 1536;
+        const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve({ dataUrl: canvas.toDataURL('image/jpeg', 0.85), mediaType: 'image/jpeg' });
+      } catch (_) { fallback(); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); fallback(); };
+    img.src = url;
+  });
+}
 function handleFiles(fileList) {
   Array.from(fileList).forEach(file => {
     if (file.type.startsWith('image/')) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        state.pending.push({
-          kind: 'image', name: file.name,
-          mediaType: file.type, dataUrl: reader.result
-        });
+      readImageScaled(file).then(out => {
+        if (!out) { showToast('Не удалось обработать изображение'); return; }
+        state.pending.push({ kind: 'image', name: file.name, mediaType: out.mediaType, dataUrl: out.dataUrl });
         renderAttachments();
-      };
-      reader.readAsDataURL(file);
+      });
     } else {
       const reader = new FileReader();
       reader.onload = () => {
