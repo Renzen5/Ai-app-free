@@ -28,8 +28,10 @@ function saveSettings() { localStorage.setItem(LS_SETTINGS, JSON.stringify(state
 const SYSTEM_PROMPT = [
   'Ты — ИИ-ассистент JustWoker.',
   'ГЛАВНОЕ ПРАВИЛО: отвечай ТОЛЬКО на языке последнего сообщения пользователя. Пользователь пишет по-русски — весь ответ на русском, даже если результаты веб-поиска на английском (переведи и перескажи их по-русски).',
+  'Веб-поиск используй ТОЛЬКО когда вопрос реально требует свежих или внешних фактов (цены, курсы, новости, статистика, события, факты, которых ты можешь не знать). На приветствия, короткие и разговорные реплики, а также на просьбы объяснить, написать, перевести или посчитать — отвечай сразу, без поиска.',
+  'Если ищешь — формулируй точный запрос по смыслу, а не по буквальному слову, и понимай сленг: «биток»/«битки» = биткоин (Bitcoin), «эфир» = Ethereum, «бакс» = доллар США и т.п. Для цен, курсов и фактов ищи по правильному названию сущности, при необходимости по-английски (например «Bitcoin price USD»), и НЕ ищи перевод или словарное значение слова.',
   'Не пересказывай результаты поиска списком. Не пиши фразы вида «I\'ll search for…», «Here are the search results», «Поиск вернул…». Не вставляй строки «Source: …» и сырые URL — источники показываются пользователю отдельным блоком.',
-  'Вместо этого дай один связный, прямой ответ по сути вопроса своими словами, на русском, в Markdown. Если данных не хватает — честно скажи об этом.'
+  'Дай один связный, прямой ответ по сути вопроса своими словами, на русском, в Markdown. Отвечай кратко и по делу, без словарных эссе. Если нужных данных в выдаче нет — скажи это одним предложением и, если уместно, подскажи, где посмотреть.'
 ].join(' ');
 
 /* System prompt for the second pass: rewrite found info in the user's language. */
@@ -507,27 +509,28 @@ function renderMessage(m) {
   wrap.innerHTML = html;
   return wrap;
 }
-function bindMessageActions() {
-  els.messages.querySelectorAll('.copy-code').forEach(btn => {
+function bindMessageActions(root) {
+  root = root || els.messages;
+  root.querySelectorAll('.copy-code').forEach(btn => {
     btn.onclick = () => copyText(btn.closest('.code-block').querySelector('pre').textContent, btn);
   });
-  els.messages.querySelectorAll('.msg-copy').forEach(btn => {
+  root.querySelectorAll('.msg-copy').forEach(btn => {
     btn.onclick = () => {
       const el = btn.closest('.msg').querySelector('.prose, .user-bubble');
       copyText(el ? el.innerText : '', btn);
     };
   });
-  els.messages.querySelectorAll('.msg-retry').forEach(btn => {
+  root.querySelectorAll('.msg-retry').forEach(btn => {
     btn.onclick = () => regenerate(btn.closest('.msg').dataset.id);
   });
-  els.messages.querySelectorAll('.msg-edit').forEach(btn => {
+  root.querySelectorAll('.msg-edit').forEach(btn => {
     btn.onclick = () => startEdit(btn.closest('.msg').dataset.id);
   });
-  els.messages.querySelectorAll('.msg-media img').forEach(img => {
+  root.querySelectorAll('.msg-media img').forEach(img => {
     img.onclick = () => openViewer(img.src);
   });
 
-  const editInput = els.messages.querySelector('.edit-input');
+  const editInput = root.querySelector('.edit-input');
   if (editInput) {
     const grow = () => {
       editInput.style.height = 'auto';
@@ -551,28 +554,51 @@ function bindMessageActions() {
 }
 
 function scrollBottom() {
-  requestAnimationFrame(() => { els.messages.scrollTop = els.messages.scrollHeight; });
+  // behavior:'auto' overrides the CSS `scroll-behavior: smooth` on .messages — a
+  // smooth programmatic scroll retargeted every streamed frame reads as jitter.
+  requestAnimationFrame(() => { els.messages.scrollTo({ top: els.messages.scrollHeight, behavior: 'auto' }); });
 }
 
 // Mount a single new message node, without re-rendering (and thus re-animating
-// via the msgIn keyframes) the rest of the thread.
+// via the msgIn keyframes) the rest of the thread. Only the new node is bound.
 function appendMessage(m) {
-  els.messages.appendChild(renderMessage(m));
-  bindMessageActions();
+  const node = renderMessage(m);
+  els.messages.appendChild(node);
+  bindMessageActions(node);
   if (!state.editing) scrollBottom();
 }
 
 // Update one message's node in place. The .msg wrapper element is kept — only its
-// inner HTML is replaced — so its one-shot entrance animation does NOT restart.
+// children are replaced — so its one-shot entrance animation does NOT restart.
 // This is what stops the whole thread from strobing on every streamed frame.
-function updateMessageNode(m) {
+// `finalizing` is the one synchronous call after a stream ends; during streaming a
+// missing node means the user switched chats, so we skip rather than full-rebuild
+// (which would re-fire msgIn ~60x/s on the chat they're now viewing).
+function updateMessageNode(m, finalizing) {
   const node = els.messages.querySelector('.msg[data-id="' + m.id + '"]');
-  if (!node) { renderMessages(); return; }
+  if (!node) { if (finalizing) renderMessages(); return; }
+
+  // Stick to the bottom only when already there (measured before the content grows),
+  // so streaming text doesn't yank a reader who scrolled up.
+  const box = els.messages;
+  const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
+
   const fresh = renderMessage(m);
+
+  // Keep already-rendered web-search blocks (their <details> open state and loaded
+  // favicons) instead of tearing them down each frame while the results are unchanged.
+  const sig = (m.searches && m.searches.length) ? JSON.stringify(m.searches) : '';
+  if (sig && sig === node.dataset.sig) {
+    const oldWs = node.querySelectorAll(':scope > .websearch');
+    const newWs = fresh.querySelectorAll(':scope > .websearch');
+    if (oldWs.length === newWs.length) newWs.forEach((n, i) => n.replaceWith(oldWs[i]));
+  }
+
   node.className = fresh.className;
-  node.innerHTML = fresh.innerHTML;
-  bindMessageActions();
-  if (!state.editing) scrollBottom();
+  node.replaceChildren(...fresh.childNodes);
+  node.dataset.sig = sig;
+  bindMessageActions(node);
+  if (!state.editing && stick) box.scrollTo({ top: box.scrollHeight, behavior: 'auto' });
 }
 
 // Coalesce rapid streaming updates into one in-place render per animation frame.
@@ -704,7 +730,8 @@ async function sendMessage() {
   const files = state.pending.filter(a => a.kind === 'file')
     .map(a => ({ name: a.name, text: a.text }));
 
-  chat.messages.push({ id: uid(), role: 'user', text, images, files });
+  const userMsg = { id: uid(), role: 'user', text, images, files };
+  chat.messages.push(userMsg);
 
   if (chat.title === 'Новый чат' && text) {
     chat.title = text.slice(0, 40);
@@ -717,7 +744,10 @@ async function sendMessage() {
 
   saveChats();
   renderChatList();
-  renderMessages();
+  // First message leaves the empty/welcome state (needs a full render); otherwise
+  // just append the new bubble so the existing thread isn't re-animated.
+  if (chat.messages.length === 1) renderMessages();
+  else appendMessage(userMsg);
 
   await runCompletion(chat);
 }
@@ -799,7 +829,7 @@ async function runCompletion(chat) {
       if (node) node.remove();              // aborted before any output → drop the empty bubble
       if (!chat.messages.length) renderMessages();
     } else {
-      updateMessageNode(typingMsg);
+      updateMessageNode(typingMsg, true);
     }
     renderChatList();
     updateSendState();
