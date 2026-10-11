@@ -841,6 +841,17 @@ function formatCryptoPrice(currencies, data) {
   return s;
 }
 
+/* When to attach the web-search tool. The model over-eagerly searches everything
+   (even greetings like «ку»), so we gate it client-side: search only on an explicit
+   request or clear signals that fresh/external info is needed — otherwise it answers
+   from its own knowledge. The user can always force it with «поищи…». */
+const EXPLICIT_SEARCH = /(в интернет|в сети|онлайн|поищ|пойщ|погугл|загугл|гугл|google|search)/i;
+const FRESH_SIGNALS = /(новост|что нового|сегодня|сейчас|вчера|завтра|послед|актуальн|свеж|погод|курс|цена|сколько стоит|поч[её]м|котировк|расписани|результат|кто выиграл|когда вы(?:йдет|ходит|пуст)|релиз|вышел|вышла|вышло|анонс|премьер|20\d\d|в этом (?:году|месяце)|на этой неделе)/i;
+function needsSearch(text) {
+  const t = text || '';
+  return EXPLICIT_SEARCH.test(t) || FRESH_SIGNALS.test(t);
+}
+
 // Shared completion step: append a typing bubble, stream the reply, allow stop.
 async function runCompletion(chat) {
   const typingMsg = { id: uid(), role: 'assistant', text: '', typing: true };
@@ -893,7 +904,9 @@ async function runCompletion(chat) {
     // replied "I don't see the picture"). If the user asked to "search" the image,
     // nudge an honest answer instead of a misleading "no internet access".
     const hasImage = !!(priceUser && priceUser.images && priceUser.images.length);
-    const wantsSearch = /(в интернет|в сети|онлайн|поищ|пойщ|погугл|загугл|гугл|google|search)/i.test((priceUser && priceUser.text) || '');
+    const userText = (priceUser && priceUser.text) || '';
+    const wantsSearch = EXPLICIT_SEARCH.test(userText);
+    const useSearch = !hasImage && needsSearch(userText);   // only search when needed
     const synthesize = !hasImage;   // text search → clean up via a 2nd pass; images → single pass
     let sysOverride;
     if (hasImage && wantsSearch) {
@@ -901,7 +914,7 @@ async function runCompletion(chat) {
     }
     const first = await callApi(chat, {
       signal: state.abort.signal,
-      webSearch: !hasImage,
+      webSearch: useSearch,
       system: sysOverride,
       onUpdate: (p) => {
         typingMsg.searches = (p.searches && p.searches.length) ? p.searches : undefined;

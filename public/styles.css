@@ -819,6 +819,8 @@ body:not(.empty) .suggest-row { display: none; }
   #input, .field input { font-size: 16px; }
   .item-actions { opacity: 1; }
   .msg-actions { opacity: 1; }
+  /* nudge the generation dots in from the screen edge on phones */
+  .typing { padding-left: 12px; }
 
   /* Phone: in an active chat the composer floats over the scrolling messages */
   .hint { display: none; }
