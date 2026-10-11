@@ -1,5 +1,5 @@
 
-const CACHE = 'justwoker-v13';
+const CACHE = 'justwoker-v14';
 const ASSETS = [
   '/',
   '/index.html',

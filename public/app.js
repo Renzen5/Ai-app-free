@@ -1095,11 +1095,13 @@ async function callApi(chat, opts) {
   if (opts.webSearch) {
     body.tools = [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }];
   }
-  // Extended thinking: the model reasons before answering (budget_tokens). max_tokens
-  // is the total, so it must leave room for both the reasoning and the answer.
+  // Reasoning. Different gateways expose it differently, so send both: Anthropic's
+  // `thinking` (budget_tokens) and the OpenAI-compatible `reasoning_effort` (the
+  // "effort" level). max_tokens is the total, so leave room for reasoning + answer.
   const thinkBudget = { low: 2000, medium: 6000, high: 12000 }[opts.think];
   if (thinkBudget) {
     body.thinking = { type: 'enabled', budget_tokens: thinkBudget };
+    body.reasoning_effort = opts.think;
     body.max_tokens = thinkBudget + Math.max(answerTokens, 1024);
   }
 
@@ -1140,6 +1142,7 @@ async function callApi(chat, opts) {
           const b = blocks[evt.index];
           if (evt.delta.type === 'text_delta') { full += evt.delta.text || ''; emit(full); }
           else if (evt.delta.type === 'thinking_delta') { thinking += evt.delta.thinking || ''; emit(full); }
+          else if (evt.delta.reasoning_content != null || evt.delta.reasoning != null) { thinking += (evt.delta.reasoning_content || evt.delta.reasoning || ''); emit(full); }
           else if (evt.delta.type === 'input_json_delta' && b) { b.jsonBuf = (b.jsonBuf || '') + (evt.delta.partial_json || ''); }
         } else if (evt.type === 'content_block_start') {
           const cb = evt.content_block || {};
