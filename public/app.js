@@ -887,12 +887,14 @@ async function runCompletion(chat) {
       }
     }
 
-    // Web search is always available; the model decides when to use it. If the user
-    // attached an image, skip search so the model answers from the picture instead.
+    // With an image, answer from the picture by default — but still allow search if
+    // the user explicitly asked for it (e.g. «поищи в интернете»). Without an image,
+    // search is available and the model decides when to use it.
     const hasImage = !!(priceUser && priceUser.images && priceUser.images.length);
+    const wantsSearch = /(в интернет|в сети|онлайн|поищ|пойщ|погугл|загугл|гугл|google|search)/i.test((priceUser && priceUser.text) || '');
     const first = await callApi(chat, {
       signal: state.abort.signal,
-      webSearch: !hasImage,
+      webSearch: hasImage ? wantsSearch : true,
       onUpdate: (p) => {
         typingMsg.searches = (p.searches && p.searches.length) ? p.searches : undefined;
         // While searching, keep the typing dots — the model's raw pass-1 text can be a
