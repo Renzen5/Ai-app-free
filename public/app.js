@@ -752,6 +752,70 @@ async function sendMessage() {
   await runCompletion(chat);
 }
 
+/* ============ Live crypto prices (CoinGecko) ============ */
+// Web search only sees page TEXT, and exchange prices are script-rendered (not in
+// that text), so "keep searching" can never surface a number — we fetch the real
+// figure from a free price API (no key, CORS-enabled) instead.
+const COIN_IDS = {
+  bitcoin: ['биток','битки','биткоин','биткойн','btc','бтц'],
+  ethereum: ['эфир','эфириум','ethereum','eth'],
+  solana: ['солана','solana','sol','сол'],
+  toncoin: ['тон','toncoin','ton'],
+  dogecoin: ['додж','доге','dogecoin','doge'],
+  binancecoin: ['bnb','бнб'],
+  ripple: ['xrp','рипл','риппл'],
+  cardano: ['cardano','ada','кардано'],
+  litecoin: ['litecoin','ltc','лайткоин'],
+  tron: ['tron','trx','трон'],
+  tether: ['tether','usdt','тезер','юсдт']
+};
+const COIN_NAMES = {
+  bitcoin: 'Биткоин', ethereum: 'Эфириум', solana: 'Solana', toncoin: 'Toncoin',
+  dogecoin: 'Dogecoin', binancecoin: 'BNB', ripple: 'XRP', cardano: 'Cardano',
+  litecoin: 'Litecoin', tron: 'TRON', tether: 'Tether'
+};
+const CUR_LABEL = { usd: '$', rub: '₽', eur: '€' };
+const PRICE_WORDS = /(сколько\s+(?:стоит|сейчас|за)|стоит|цена|курс|стоимост|поч[её]м|price|cost|rate)/i;
+
+function detectCoin(text) {
+  const t = (text || '').toLowerCase();
+  if (!PRICE_WORDS.test(t)) return null;
+  for (const id in COIN_IDS) {
+    for (const a of COIN_IDS[id]) {
+      const esc = a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (new RegExp('(?<![\\p{L}\\p{N}])' + esc + '(?![\\p{L}\\p{N}])', 'iu').test(t)) return id;
+    }
+  }
+  return null;
+}
+function detectCurrencies(text) {
+  const t = (text || '').toLowerCase();
+  const cur = [];
+  if (/(руб|рубл|₽|\brub\b)/i.test(t)) cur.push('rub');
+  if (/(доллар|бакс|\$|\busd\b)/i.test(t)) cur.push('usd');
+  if (/(евро|€|\beur\b)/i.test(t)) cur.push('eur');
+  return cur.length ? cur : ['usd', 'rub'];
+}
+async function fetchCryptoPrice(id, currencies, signal) {
+  const url = 'https://api.coingecko.com/api/v3/simple/price?ids=' + encodeURIComponent(id) +
+    '&vs_currencies=' + encodeURIComponent(currencies.join(',')) + '&include_24hr_change=true';
+  const res = await fetch(url, { signal });
+  if (!res.ok) throw new Error('CoinGecko HTTP ' + res.status);
+  const data = await res.json();
+  if (!data || !data[id]) throw new Error('CoinGecko: нет данных');
+  return data[id];
+}
+function fmtNum(n) {
+  if (n == null) return '—';
+  return Number(n).toLocaleString('ru-RU', { maximumFractionDigits: n >= 1 ? 2 : 8 });
+}
+function formatCryptoPrice(currencies, data) {
+  let s = currencies.map(c => (CUR_LABEL[c] || c) + ' ' + fmtNum(data[c])).join(' / ');
+  const chg = data[currencies[0] + '_24h_change'];
+  if (typeof chg === 'number') s += ' (за 24ч ' + (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%)';
+  return s;
+}
+
 // Shared completion step: append a typing bubble, stream the reply, allow stop.
 async function runCompletion(chat) {
   const typingMsg = { id: uid(), role: 'assistant', text: '', typing: true };
@@ -765,6 +829,40 @@ async function runCompletion(chat) {
   const s = state.settings;
   let aborted = false;
   try {
+    // Live crypto price → fetch the real number from CoinGecko, bypassing web search.
+    const priceUser = [...chat.messages].reverse().find(m => m.role === 'user');
+    const coin = priceUser ? detectCoin(priceUser.text) : null;
+    if (coin) {
+      let priceText = null;
+      try {
+        const currencies = detectCurrencies(priceUser.text);
+        const data = await fetchCryptoPrice(coin, currencies, state.abort.signal);
+        priceText = formatCryptoPrice(currencies, data);
+      } catch (e) {
+        if (e && e.name === 'AbortError') throw e;   // stop pressed
+      }
+      if (priceText) {
+        const coinName = COIN_NAMES[coin] || coin;
+        const direct = 'Актуальная цена: ' + coinName + ' — ' + priceText + '. Источник: CoinGecko.';
+        const note = SYSTEM_PROMPT + '\n\nАКТУАЛЬНАЯ ЦЕНА из CoinGecko на ' +
+          new Date().toLocaleString('ru-RU') + ': ' + coinName + ' = ' + priceText +
+          '. Ответь пользователю этой ценой на русском, кратко. Не ищи в интернете — цифры уже актуальны.';
+        try {
+          const r = await callApi(chat, {
+            signal: state.abort.signal,
+            system: note,
+            onUpdate: (p) => { typingMsg.text = p.text; if (p.text) typingMsg.typing = false; scheduleRender(typingMsg); }
+          });
+          typingMsg.text = r.text || direct;
+        } catch (e) {
+          if (e && e.name === 'AbortError') throw e;
+          typingMsg.text = direct;   // model call failed → still show the fetched price
+        }
+        typingMsg.typing = false;
+        return;
+      }
+    }
+
     // Pass 1 — model answers (and runs web search if the toggle is on)
     const first = await callApi(chat, {
       signal: state.abort.signal,
