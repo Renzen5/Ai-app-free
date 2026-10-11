@@ -554,12 +554,39 @@ function scrollBottom() {
   requestAnimationFrame(() => { els.messages.scrollTop = els.messages.scrollHeight; });
 }
 
-// Coalesce rapid streaming updates into one render per animation frame
-let renderScheduled = false;
-function scheduleRender() {
+// Mount a single new message node, without re-rendering (and thus re-animating
+// via the msgIn keyframes) the rest of the thread.
+function appendMessage(m) {
+  els.messages.appendChild(renderMessage(m));
+  bindMessageActions();
+  if (!state.editing) scrollBottom();
+}
+
+// Update one message's node in place. The .msg wrapper element is kept — only its
+// inner HTML is replaced — so its one-shot entrance animation does NOT restart.
+// This is what stops the whole thread from strobing on every streamed frame.
+function updateMessageNode(m) {
+  const node = els.messages.querySelector('.msg[data-id="' + m.id + '"]');
+  if (!node) { renderMessages(); return; }
+  const fresh = renderMessage(m);
+  node.className = fresh.className;
+  node.innerHTML = fresh.innerHTML;
+  bindMessageActions();
+  if (!state.editing) scrollBottom();
+}
+
+// Coalesce rapid streaming updates into one in-place render per animation frame.
+// Only the in-flight message is touched, so the rest of the thread (and the msgIn
+// entrance animation on every bubble) isn't torn down and rebuilt ~60x/second.
+let renderScheduled = 0;
+let streamingMsg = null;
+function scheduleRender(m) {
+  if (m) streamingMsg = m;
   if (renderScheduled) return;
-  renderScheduled = true;
-  requestAnimationFrame(() => { renderScheduled = false; renderMessages(); });
+  renderScheduled = requestAnimationFrame(() => {
+    renderScheduled = 0;
+    if (streamingMsg) updateMessageNode(streamingMsg);
+  });
 }
 
 /* ============ Suggestions (empty-state pills) ============ */
@@ -699,7 +726,7 @@ async function sendMessage() {
 async function runCompletion(chat) {
   const typingMsg = { id: uid(), role: 'assistant', text: '', typing: true };
   chat.messages.push(typingMsg);
-  renderMessages();
+  appendMessage(typingMsg);
 
   state.sending = true;
   state.abort = new AbortController();
@@ -715,7 +742,7 @@ async function runCompletion(chat) {
       onUpdate: (p) => {
         typingMsg.searches = p.searches;
         if (!s.webSearch) { typingMsg.text = p.text; if (p.text) typingMsg.typing = false; }
-        scheduleRender();
+        scheduleRender(typingMsg);
       }
     });
     typingMsg.searches = (first.searches && first.searches.length) ? first.searches : undefined;
@@ -734,7 +761,7 @@ async function runCompletion(chat) {
               first.text + '\n\nПерескажи её своими словами и дай один связный ответ на вопрос — на русском. ' +
               'Не переводи дословно, не копируй, без списка результатов, без ссылок и слова «Source».'
           }],
-          onUpdate: (p) => { typingMsg.text = p.text; if (p.text) typingMsg.typing = false; scheduleRender(); }
+          onUpdate: (p) => { typingMsg.text = p.text; if (p.text) typingMsg.typing = false; scheduleRender(typingMsg); }
         });
         typingMsg.text = second.text || first.text;
       } catch (e2) {
@@ -762,8 +789,18 @@ async function runCompletion(chat) {
   } finally {
     state.sending = false;
     state.abort = null;
+    if (renderScheduled) { cancelAnimationFrame(renderScheduled); renderScheduled = 0; }
+    streamingMsg = null;
     saveChats();
-    renderMessages();
+    // Finalize the in-flight bubble in place. A full renderMessages() here would
+    // remount every node and re-fire the msgIn entrance animation — a visible flash.
+    if (chat.messages.indexOf(typingMsg) < 0) {
+      const node = els.messages.querySelector('.msg[data-id="' + typingMsg.id + '"]');
+      if (node) node.remove();              // aborted before any output → drop the empty bubble
+      if (!chat.messages.length) renderMessages();
+    } else {
+      updateMessageNode(typingMsg);
+    }
     renderChatList();
     updateSendState();
     if (aborted) showToast('Генерация остановлена');
