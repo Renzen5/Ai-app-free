@@ -643,15 +643,6 @@ body:not(.empty) .suggest-row { display: none; }
   flex-shrink: 0;
 }
 .composer .attach:hover { color: var(--accent); background: var(--surface-alt); }
-.composer .web-toggle {
-  color: var(--text-muted);
-  width: 38px; height: 38px; padding: 0;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.composer .web-toggle svg { width: 19px; height: 19px; }
-.composer .web-toggle:hover { color: var(--text); background: var(--surface-alt); }
-.composer .web-toggle.active { color: var(--accent); background: var(--accent-soft); }
 #input {
   flex: 1;
   background: none; border: none; color: var(--text);

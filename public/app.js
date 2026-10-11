@@ -8,8 +8,7 @@ const defaultSettings = {
   apiKey: '',
   model: 'claude-opus-4-8',
   maxTokens: 2048,
-  theme: 'system',           // 'system' | 'light' | 'dark'
-  webSearch: false           // let the model search the web (Anthropic web_search tool)
+  theme: 'system'            // 'system' | 'light' | 'dark'
 };
 
 function loadChats() {
@@ -39,9 +38,6 @@ const SYSTEM_PROMPT = [
 /* Appended to the system prompt only when web search is enabled for the request. */
 const SEARCH_RULES = ' У тебя есть инструмент веб-поиска. Используй его ТОЛЬКО когда ответ требует свежих или внешних данных, которых ты можешь не знать (новости, цены, статистика, события, факты о конкретных людях, местах или продуктах); общие вопросы, объяснения, тексты и код решай сам, без поиска. Формулируй точные запросы по смыслу, а не по буквальному слову. По итогам дай один связный ответ своими словами на языке пользователя — не список результатов; не вставляй сырые ссылки, строки «Source:» и фразы вроде «вот результаты поиска», источники показываются пользователю отдельным блоком.';
 
-/* System prompt for the second pass: rewrite found info in the user's language. */
-const PARAPHRASE_SYSTEM = 'Перепиши найденную в интернете информацию СВОИМИ СЛОВАМИ на языке последнего сообщения пользователя — связно, по делу, без воды. Не переводи дословно, не копируй фразы источников, не перечисляй результаты списком, не пиши «Source» и не вставляй ссылки.';
-
 /* ============ State ============ */
 const state = {
   chats: loadChats(),
@@ -69,7 +65,7 @@ const els = {
   newChatBtn: $('newChatBtn'), newChatTop: $('newChatTop'),
   chatList: $('chatList'), messages: $('messages'), threadArea: $('threadArea'),
   input: $('input'), sendBtn: $('sendBtn'),
-  attachBtn: $('attachBtn'), fileInput: $('fileInput'), webBtn: $('webBtn'),
+  attachBtn: $('attachBtn'), fileInput: $('fileInput'),
   attachments: $('attachments'), topbarTitle: $('topbarTitle'),
   suggestRow: $('suggestRow'),
   themeToggle: $('themeToggle'), themeSeg: $('themeSeg'),
@@ -743,12 +739,6 @@ function stopGeneration() {
   if (state.abort) { try { state.abort.abort(); } catch (_) {} }
 }
 
-function updateWebUI() {
-  const on = !!state.settings.webSearch;
-  els.webBtn.classList.toggle('active', on);
-  els.webBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
-}
-
 async function sendMessage() {
   if (state.sending) return;
   const text = els.input.value.trim();
@@ -858,7 +848,6 @@ async function runCompletion(chat) {
   state.abort = new AbortController();
   updateSendState();
 
-  const s = state.settings;
   let aborted = false;
   try {
     // Live crypto price → fetch the real number from CoinGecko, bypassing web search.
@@ -895,42 +884,21 @@ async function runCompletion(chat) {
       }
     }
 
-    // Pass 1 — model answers (and runs web search if the toggle is on)
+    // Single pass — web search is always available; the model decides on its own
+    // when to use it (fresh facts, things it doesn't know, or when asked) and
+    // streams the answer live.
     const first = await callApi(chat, {
       signal: state.abort.signal,
-      webSearch: s.webSearch,
+      webSearch: true,
       onUpdate: (p) => {
-        typingMsg.searches = p.searches;
-        if (!s.webSearch) { typingMsg.text = p.text; if (p.text) typingMsg.typing = false; }
+        typingMsg.searches = (p.searches && p.searches.length) ? p.searches : undefined;
+        typingMsg.text = p.text;
+        if (p.text) typingMsg.typing = false;
         scheduleRender(typingMsg);
       }
     });
     typingMsg.searches = (first.searches && first.searches.length) ? first.searches : undefined;
-
-    if (s.webSearch && typingMsg.searches && first.text) {
-      // Pass 2 — retell the found info in the user's own words, in Russian
-      const lastUser = [...chat.messages].reverse().find(m => m.role === 'user');
-      const question = lastUser ? (lastUser.text || '') : '';
-      try {
-        const second = await callApi(null, {
-          signal: state.abort.signal,
-          system: PARAPHRASE_SYSTEM,
-          messages: [{
-            role: 'user',
-            content: 'Вопрос пользователя: "' + question + '"\n\nИнформация из интернета (может быть на разных языках):\n' +
-              first.text + '\n\nПерескажи её своими словами и дай один связный ответ на вопрос — на русском. ' +
-              'Не переводи дословно, не копируй, без списка результатов, без ссылок и слова «Source».'
-          }],
-          onUpdate: (p) => { typingMsg.text = p.text; if (p.text) typingMsg.typing = false; scheduleRender(typingMsg); }
-        });
-        typingMsg.text = second.text || first.text;
-      } catch (e2) {
-        if (e2 && e2.name === 'AbortError') throw e2;   // stop was pressed
-        typingMsg.text = first.text;                     // paraphrase failed → show the raw (cleaned at render)
-      }
-    } else {
-      typingMsg.text = first.text;
-    }
+    typingMsg.text = first.text;
     typingMsg.typing = false;
     if (!typingMsg.text && !typingMsg.searches) typingMsg.text = '(пустой ответ)';
   } catch (err) {
@@ -1239,12 +1207,6 @@ els.newChatTop.onclick = newChat;
 els.sendBtn.onclick = () => { if (state.sending) stopGeneration(); else sendMessage(); };
 els.attachBtn.onclick = () => els.fileInput.click();
 els.fileInput.onchange = (e) => { handleFiles(e.target.files); e.target.value = ''; };
-els.webBtn.onclick = () => {
-  state.settings.webSearch = !state.settings.webSearch;
-  saveSettings();
-  updateWebUI();
-  showToast(state.settings.webSearch ? 'Поиск в интернете включён' : 'Поиск в интернете выключен');
-};
 els.settingsBtn.onclick = openSettings;
 els.closeSettings.onclick = closeSettings;
 els.saveSettings.onclick = saveSettingsHandler;
@@ -1343,7 +1305,6 @@ if ('serviceWorker' in navigator) {
 /* ============ Init ============ */
 renderSuggestions();
 applyTheme();
-updateWebUI();
 renderChatList();
 renderMessages();
 autoGrow();
