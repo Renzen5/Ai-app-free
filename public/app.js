@@ -887,25 +887,33 @@ async function runCompletion(chat) {
       }
     }
 
-    // With an image, answer from the picture by default — but still allow search if
-    // the user explicitly asked for it (e.g. «поищи в интернете»). Without an image,
-    // search is available and the model decides when to use it.
+    // Images: answer from the picture (vision reliably works). Don't attach web
+    // search — text search can't identify a picture, tools can crowd out the image on
+    // some backends, and the text-only synthesis pass has no image (that's why it
+    // replied "I don't see the picture"). If the user asked to "search" the image,
+    // nudge an honest answer instead of a misleading "no internet access".
     const hasImage = !!(priceUser && priceUser.images && priceUser.images.length);
     const wantsSearch = /(в интернет|в сети|онлайн|поищ|пойщ|погугл|загугл|гугл|google|search)/i.test((priceUser && priceUser.text) || '');
+    const synthesize = !hasImage;   // text search → clean up via a 2nd pass; images → single pass
+    let sysOverride;
+    if (hasImage && wantsSearch) {
+      sysOverride = SYSTEM_PROMPT + ' Пользователь просит «найти» изображение. Настоящего поиска по картинке у тебя нет, и доступ к интернету тут ни при чём — НЕ пиши, что у тебя нет интернета. Опиши как можно подробнее, что изображено, и подскажи, что для поиска первоисточника можно загрузить картинку в Google Lens или Яндекс.Картинки.';
+    }
     const first = await callApi(chat, {
       signal: state.abort.signal,
-      webSearch: hasImage ? wantsSearch : true,
+      webSearch: !hasImage,
+      system: sysOverride,
       onUpdate: (p) => {
         typingMsg.searches = (p.searches && p.searches.length) ? p.searches : undefined;
-        // While searching, keep the typing dots — the model's raw pass-1 text can be a
-        // dump of result snippets; the synthesis pass below produces the clean answer.
-        if (!typingMsg.searches) { typingMsg.text = p.text; if (p.text) typingMsg.typing = false; }
+        // Hide the raw pass-1 text only when a synthesis pass will replace it (a dump
+        // of result snippets). With an image we stream the answer live (no 2nd pass).
+        if (!(synthesize && typingMsg.searches)) { typingMsg.text = p.text; if (p.text) typingMsg.typing = false; }
         scheduleRender(typingMsg);
       }
     });
     typingMsg.searches = (first.searches && first.searches.length) ? first.searches : undefined;
 
-    if (typingMsg.searches && first.text) {
+    if (synthesize && typingMsg.searches && first.text) {
       // Synthesis pass — turn the found info into one clean answer in the user's
       // language, so we never show the raw "list of search results" dump.
       const question = priceUser ? (priceUser.text || '') : '';
