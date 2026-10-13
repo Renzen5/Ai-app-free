@@ -636,6 +636,7 @@ body:not(.empty) .suggest-row { display: none; }
   transition: border-color 0.2s var(--ease), box-shadow 0.2s;
 }
 .composer:focus-within { border-color: var(--border-strong); box-shadow: var(--shadow-md), 0 0 0 3px var(--accent-soft); }
+.composer-wrap.drag-over .composer { border-color: var(--accent); box-shadow: var(--shadow-md), 0 0 0 3px var(--accent-soft); }
 .composer .attach {
   color: var(--text-muted);
   width: 38px; height: 38px; padding: 0;

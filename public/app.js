@@ -1299,6 +1299,29 @@ els.input.onkeydown = (e) => {
   }
 };
 
+// Paste images from clipboard (Ctrl+V / Cmd+V)
+els.input.addEventListener('paste', (e) => {
+  const items = e.clipboardData && e.clipboardData.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault();
+      const file = item.getAsFile();
+      if (file) handleFiles([file]);
+    }
+  }
+});
+
+// Drag-and-drop files onto the composer
+const composerWrap = els.input.closest('.composer-wrap') || els.input.parentElement;
+composerWrap.addEventListener('dragover', (e) => { e.preventDefault(); composerWrap.classList.add('drag-over'); });
+composerWrap.addEventListener('dragleave', (e) => { e.preventDefault(); composerWrap.classList.remove('drag-over'); });
+composerWrap.addEventListener('drop', (e) => {
+  e.preventDefault();
+  composerWrap.classList.remove('drag-over');
+  if (e.dataTransfer && e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
+});
+
 els.tabs.forEach(t => {
   t.onclick = () => {
     els.tabs.forEach(x => x.classList.remove('active'));
